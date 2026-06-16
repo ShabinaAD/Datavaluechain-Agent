@@ -32,10 +32,17 @@ export const WORKFLOW_STAGES: StageDefinition[] = [
     blurb: 'Identify and connect the source systems that feed the value chain.',
   },
   {
+    id: 'engineering',
+    path: 'engineering',
+    label: 'Data Engineering',
+    agent: 'Data Engineer Agent',
+    blurb: 'Build the ingestion and transformation pipelines that power the model.',
+  },
+  {
     id: 'modeling',
     path: 'modeling',
     label: 'Data Modeling',
-    agent: 'Data Engineer Agent',
+    agent: 'Analytics Engineer Agent',
     blurb: 'Define the grain, dimensions, measures, and transformations.',
   },
   {

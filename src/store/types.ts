@@ -10,6 +10,7 @@
 export type StageId =
   | 'requirements'
   | 'sources'
+  | 'engineering'
   | 'modeling'
   | 'dashboard'
   | 'publish';
@@ -29,6 +30,13 @@ export interface DataSource {
   kind: 'warehouse' | 'database' | 'api' | 'file' | 'stream';
   connection: string;
   notes: string;
+}
+
+export interface EngineeringPlan {
+  ingestion: string;
+  pipeline: string;
+  schedule: string;
+  quality: string;
 }
 
 export interface ModelingPlan {
@@ -60,6 +68,7 @@ export interface Project {
   updatedAt: number;
   requirements: BusinessRequirements;
   sources: DataSource[];
+  engineering: EngineeringPlan;
   modeling: ModelingPlan;
   dashboard: DashboardPlan;
   stageMeta: Record<StageId, StageMeta>;

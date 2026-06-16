@@ -9,6 +9,7 @@ import {
   OverviewIcon,
   RequirementsIcon,
   SourcesIcon,
+  EngineeringIcon,
   ModelingIcon,
   DashboardIcon,
   PublishIcon,
@@ -23,6 +24,7 @@ type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
 const STAGE_ICONS: Record<StageId, IconComponent> = {
   requirements: RequirementsIcon,
   sources: SourcesIcon,
+  engineering: EngineeringIcon,
   modeling: ModelingIcon,
   dashboard: DashboardIcon,
   publish: PublishIcon,

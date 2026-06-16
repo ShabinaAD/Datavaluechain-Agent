@@ -4,6 +4,7 @@ import type {
   BusinessRequirements,
   DashboardPlan,
   DataSource,
+  EngineeringPlan,
   ModelingPlan,
   Project,
   StageId,
@@ -28,7 +29,8 @@ import { WORKFLOW_STAGES } from '../config/workflow';
  */
 
 const STORAGE_KEY = 'dvcaf.project';
-const STORAGE_VERSION = 1;
+// v2 introduced the dedicated "Data Engineering" stage.
+const STORAGE_VERSION = 2;
 
 function makeId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -54,6 +56,7 @@ export function createEmptyProject(): Project {
     updatedAt: now,
     requirements: { objective: '', audience: '', keyQuestions: '', successMetrics: '' },
     sources: [],
+    engineering: { ingestion: '', pipeline: '', schedule: '', quality: '' },
     modeling: { grain: '', dimensions: '', measures: '', transformations: '' },
     dashboard: { title: '', layout: 'grid', widgets: '', notes: '' },
     stageMeta: emptyStageMeta(),
@@ -71,6 +74,7 @@ interface ProjectState {
   renameProject: (name: string) => void;
   setDescription: (description: string) => void;
   updateRequirements: (patch: Partial<BusinessRequirements>) => void;
+  updateEngineering: (patch: Partial<EngineeringPlan>) => void;
   updateModeling: (patch: Partial<ModelingPlan>) => void;
   updateDashboard: (patch: Partial<DashboardPlan>) => void;
   addSource: () => void;
@@ -104,6 +108,11 @@ export const useProjectStore = create<ProjectState>()(
       updateRequirements: (patch) =>
         set((s) => ({
           project: touch({ ...s.project, requirements: { ...s.project.requirements, ...patch } }),
+        })),
+
+      updateEngineering: (patch) =>
+        set((s) => ({
+          project: touch({ ...s.project, engineering: { ...s.project.engineering, ...patch } }),
         })),
 
       updateModeling: (patch) =>
@@ -182,12 +191,23 @@ export const useProjectStore = create<ProjectState>()(
         state?.setHasHydrated(true);
       },
       migrate: (persisted, fromVersion) => {
-        // Forward-migration hook. Today there is only v1; future schema bumps
-        // transform `persisted` here instead of dropping the user's work.
-        if (fromVersion < 1) {
-          return persisted as { project: Project; lastSavedAt: number | null };
+        // Forward-migration hook: upgrade old saved blobs instead of dropping
+        // the user's work. Each bump backfills only what changed.
+        const state = persisted as { project: Project; lastSavedAt: number | null };
+        if (fromVersion < 2 && state?.project) {
+          // v1 -> v2: add the new "Data Engineering" stage and its meta.
+          state.project.engineering = state.project.engineering ?? {
+            ingestion: '',
+            pipeline: '',
+            schedule: '',
+            quality: '',
+          };
+          state.project.stageMeta = {
+            ...emptyStageMeta(),
+            ...state.project.stageMeta,
+          };
         }
-        return persisted as { project: Project; lastSavedAt: number | null };
+        return state;
       },
     },
   ),

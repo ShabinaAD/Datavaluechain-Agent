@@ -42,6 +42,15 @@ export const SourcesIcon = (props: IconProps) => (
   </svg>
 );
 
+export const EngineeringIcon = (props: IconProps) => (
+  <svg {...base(props)}>
+    <circle cx="5" cy="6" r="2" />
+    <circle cx="5" cy="18" r="2" />
+    <circle cx="19" cy="12" r="2" />
+    <path d="M7 6h6a4 4 0 0 1 4 4v0M7 18h6a4 4 0 0 0 4-4v0" />
+  </svg>
+);
+
 export const ModelingIcon = (props: IconProps) => (
   <svg {...base(props)}>
     <rect x="3" y="3" width="7" height="7" rx="1.5" />
