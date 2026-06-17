@@ -9,6 +9,7 @@ import type {
   Project,
   StageId,
   StageMeta,
+  StageResult,
   StageStatus,
 } from './types';
 import { WORKFLOW_STAGES } from '../config/workflow';
@@ -30,7 +31,8 @@ import { WORKFLOW_STAGES } from '../config/workflow';
 
 const STORAGE_KEY = 'dvcaf.project';
 // v2 introduced the dedicated "Data Engineering" stage.
-const STORAGE_VERSION = 2;
+// v3 introduced persisted per-stage agent results.
+const STORAGE_VERSION = 3;
 
 function makeId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -60,6 +62,7 @@ export function createEmptyProject(): Project {
     modeling: { grain: '', dimensions: '', measures: '', transformations: '' },
     dashboard: { title: '', layout: 'grid', widgets: '', notes: '' },
     stageMeta: emptyStageMeta(),
+    agentResults: {},
   };
 }
 
@@ -78,10 +81,14 @@ interface ProjectState {
   updateModeling: (patch: Partial<ModelingPlan>) => void;
   updateDashboard: (patch: Partial<DashboardPlan>) => void;
   addSource: () => void;
+  /** Add a source pre-filled from an imported sample file. */
+  importSource: (partial: Partial<DataSource>) => void;
   updateSource: (id: string, patch: Partial<DataSource>) => void;
   removeSource: (id: string) => void;
   setStageStatus: (id: StageId, status: StageStatus) => void;
   setStageNotes: (id: StageId, notes: string) => void;
+  setStageResult: (id: StageId, result: StageResult) => void;
+  clearStageResult: (id: StageId) => void;
   resetProject: () => void;
   /** Replace the whole project, e.g. when restoring from a backup file. */
   replaceProject: (project: Project) => void;
@@ -142,6 +149,24 @@ export const useProjectStore = create<ProjectState>()(
           }),
         })),
 
+      importSource: (partial) =>
+        set((s) => ({
+          project: touch({
+            ...s.project,
+            sources: [
+              ...s.project.sources,
+              {
+                id: makeId('src'),
+                name: '',
+                kind: 'file',
+                connection: '',
+                notes: '',
+                ...partial,
+              },
+            ],
+          }),
+        })),
+
       updateSource: (id, patch) =>
         set((s) => ({
           project: touch({
@@ -171,6 +196,22 @@ export const useProjectStore = create<ProjectState>()(
           project: touch({
             ...s.project,
             stageMeta: { ...s.project.stageMeta, [id]: { ...s.project.stageMeta[id], notes } },
+          }),
+        })),
+
+      setStageResult: (id, result) =>
+        set((s) => ({
+          project: touch({
+            ...s.project,
+            agentResults: { ...s.project.agentResults, [id]: result },
+          }),
+        })),
+
+      clearStageResult: (id) =>
+        set((s) => ({
+          project: touch({
+            ...s.project,
+            agentResults: { ...s.project.agentResults, [id]: undefined },
           }),
         })),
 
@@ -206,6 +247,10 @@ export const useProjectStore = create<ProjectState>()(
             ...emptyStageMeta(),
             ...state.project.stageMeta,
           };
+        }
+        if (fromVersion < 3 && state?.project) {
+          // v2 -> v3: add the persisted agent-results map.
+          state.project.agentResults = state.project.agentResults ?? {};
         }
         return state;
       },

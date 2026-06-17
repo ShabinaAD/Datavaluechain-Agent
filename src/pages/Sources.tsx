@@ -2,9 +2,21 @@ import { StagePage } from '../components/StagePage';
 import { Card, CardBody, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { TextInput, Select, TextArea } from '../components/ui/Field';
+import { ConnectFirst } from '../components/ConnectFirst';
+import { FileUpload } from '../components/FileUpload';
 import { useProjectStore } from '../store/projectStore';
 import type { DataSource } from '../store/types';
 import { PlusIcon, TrashIcon, SourcesIcon } from '../icons';
+
+/** Turn a sample file's first line into a readable "columns" summary. */
+function deriveColumns(text: string): string {
+  const firstLine = text.split(/\r?\n/)[0] ?? '';
+  const cols = firstLine
+    .split(/[,\t]/)
+    .map((c) => c.trim())
+    .filter(Boolean);
+  return cols.length ? `Columns: ${cols.join(', ')}` : 'Imported sample file.';
+}
 
 const KINDS: { value: DataSource['kind']; label: string }[] = [
   { value: 'warehouse', label: 'Warehouse' },
@@ -17,15 +29,28 @@ const KINDS: { value: DataSource['kind']; label: string }[] = [
 export function Sources() {
   const sources = useProjectStore((s) => s.project.sources);
   const addSource = useProjectStore((s) => s.addSource);
+  const importSource = useProjectStore((s) => s.importSource);
   const updateSource = useProjectStore((s) => s.updateSource);
   const removeSource = useProjectStore((s) => s.removeSource);
 
   return (
     <StagePage stageId="sources">
-      <div className="mb-4 flex justify-end">
-        <Button onClick={addSource} leftIcon={<PlusIcon width={16} height={16} />}>
-          Add source
-        </Button>
+      <div className="mb-4 space-y-4">
+        <ConnectFirst
+          service="Database"
+          hint="Set DATABASE_URL on the server to enable live connections. You can keep designing your sources now — your work is saved."
+        />
+        <FileUpload
+          uploadKey="sources"
+          onDerive={({ name, text }) =>
+            importSource({ name, kind: 'file', connection: name, notes: deriveColumns(text) })
+          }
+        />
+        <div className="flex justify-end">
+          <Button onClick={addSource} leftIcon={<PlusIcon width={16} height={16} />}>
+            Add source
+          </Button>
+        </div>
       </div>
 
       {sources.length === 0 ? (

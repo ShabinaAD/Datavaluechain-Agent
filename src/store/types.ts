@@ -59,6 +59,19 @@ export interface StageMeta {
   notes: string;
 }
 
+/** Where a generated result came from. */
+export type ResultSource = 'ai' | 'fallback';
+
+/**
+ * A persisted agent result. Stored on the project so that "every result the AI
+ * produced is still on screen after a refresh" (spec 1.7).
+ */
+export interface StageResult {
+  output: string;
+  source: ResultSource;
+  at: number;
+}
+
 export interface Project {
   /** Stable id; lets us key persisted blobs and future multi-project support. */
   id: string;
@@ -72,6 +85,8 @@ export interface Project {
   modeling: ModelingPlan;
   dashboard: DashboardPlan;
   stageMeta: Record<StageId, StageMeta>;
+  /** Persisted agent output per stage, so results survive a refresh. */
+  agentResults: Partial<Record<StageId, StageResult>>;
 }
 
 export type ThemeMode = 'light' | 'dark';
