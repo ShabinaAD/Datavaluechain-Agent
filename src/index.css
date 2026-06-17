@@ -1,0 +1,55 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-canvas: 248 250 252; /* slate-50 */
+    --color-surface: 255 255 255;
+    --color-surface-muted: 241 245 249; /* slate-100 */
+    --color-border: 226 232 240; /* slate-200 */
+    --color-content: 15 23 42; /* slate-900 */
+    --color-content-muted: 71 85 105; /* slate-600 */
+    --color-content-subtle: 148 163 184; /* slate-400 */
+
+    color-scheme: light;
+  }
+
+  .dark {
+    --color-canvas: 2 6 23; /* slate-950 */
+    --color-surface: 15 23 42; /* slate-900 */
+    --color-surface-muted: 30 41 59; /* slate-800 */
+    --color-border: 51 65 85; /* slate-700 */
+    --color-content: 241 245 249; /* slate-100 */
+    --color-content-muted: 148 163 184; /* slate-400 */
+    --color-content-subtle: 100 116 139; /* slate-500 */
+
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-content font-sans antialiased;
+  }
+
+  *:focus-visible {
+    @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-canvas;
+  }
+}
+
+@layer components {
+  .field-label {
+    @apply mb-1.5 block text-sm font-medium text-content;
+  }
+
+  .field-hint {
+    @apply mt-1.5 text-xs text-content-muted;
+  }
+}
