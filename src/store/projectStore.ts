@@ -1,18 +1,23 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type {
+  BrdDocument,
+  BrdSectionId,
+  BrdState,
   BusinessRequirements,
   DashboardPlan,
   DataSource,
   EngineeringPlan,
   ModelingPlan,
   Project,
+  ResultSource,
   StageId,
   StageMeta,
   StageResult,
   StageStatus,
 } from './types';
 import { WORKFLOW_STAGES } from '../config/workflow';
+import { DEFAULT_DOMAIN_ID, domainById } from '../config/domains';
 
 /**
  * PERSISTENCE CONTRACT
@@ -32,10 +37,43 @@ import { WORKFLOW_STAGES } from '../config/workflow';
 const STORAGE_KEY = 'dvcaf.project';
 // v2 introduced the dedicated "Data Engineering" stage.
 // v3 introduced persisted per-stage agent results.
-const STORAGE_VERSION = 3;
+// v4 introduced the BRD Generator workspace.
+const STORAGE_VERSION = 4;
+
+/** Sensible default output folder for the .docx export (spec 2.5.7). */
+const DEFAULT_OUTPUT_FOLDER = '~/Downloads/BRD';
 
 function makeId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** A fresh BRD workspace, seeded from the default domain (spec 2.5.2, 2.5.3). */
+export function createEmptyBrd(): BrdState {
+  const domain = domainById(DEFAULT_DOMAIN_ID);
+  return {
+    domain: DEFAULT_DOMAIN_ID,
+    projectName: domain?.suggestedName ?? '',
+    projectNameEdited: false,
+    requirement: domain?.requirementSeed ?? '',
+    requirementEdited: false,
+    outputFolder: DEFAULT_OUTPUT_FOLDER,
+    createFolder: true,
+    versions: [],
+    activeVersion: null,
+    comments: {},
+  };
+}
+
+/** Compute the next version label given the history and the bump kind (spec 2.7.2). */
+function nextVersion(
+  versions: BrdState['versions'],
+  bump: 'minor' | 'major',
+): { label: string; major: number; minor: number } {
+  if (versions.length === 0) return { label: '1.0', major: 1, minor: 0 };
+  const last = versions[versions.length - 1];
+  const major = bump === 'major' ? last.major + 1 : last.major;
+  const minor = bump === 'major' ? 0 : last.minor + 1;
+  return { label: `${major}.${minor}`, major, minor };
 }
 
 function emptyStageMeta(): Record<StageId, StageMeta> {
@@ -63,6 +101,7 @@ export function createEmptyProject(): Project {
     dashboard: { title: '', layout: 'grid', widgets: '', notes: '' },
     stageMeta: emptyStageMeta(),
     agentResults: {},
+    brd: createEmptyBrd(),
   };
 }
 
@@ -89,6 +128,21 @@ interface ProjectState {
   setStageNotes: (id: StageId, notes: string) => void;
   setStageResult: (id: StageId, result: StageResult) => void;
   clearStageResult: (id: StageId) => void;
+
+  // --- BRD Generator (spec 2.x) ---
+  /** Change domain; re-seed name/requirement only if the user hasn't edited them. */
+  setBrdDomain: (domainId: string) => void;
+  /** User edits to the project name stop further auto-seeding (2.8.2). */
+  setBrdProjectName: (name: string) => void;
+  /** User edits to the requirement stop further auto-seeding (2.8.2). */
+  setBrdRequirement: (requirement: string) => void;
+  setBrdOutputFolder: (folder: string) => void;
+  setBrdCreateFolder: (createFolder: boolean) => void;
+  setBrdComment: (section: BrdSectionId, comment: string) => void;
+  /** Append a generated revision and make it active; computes the version bump. */
+  addBrdVersion: (doc: BrdDocument, source: ResultSource, bump: 'minor' | 'major') => string;
+  setActiveBrdVersion: (label: string) => void;
+
   resetProject: () => void;
   /** Replace the whole project, e.g. when restoring from a backup file. */
   replaceProject: (project: Project) => void;
@@ -215,6 +269,89 @@ export const useProjectStore = create<ProjectState>()(
           }),
         })),
 
+      setBrdDomain: (domainId) =>
+        set((s) => {
+          const domain = domainById(domainId);
+          const brd = s.project.brd;
+          return {
+            project: touch({
+              ...s.project,
+              brd: {
+                ...brd,
+                domain: domainId,
+                // Re-seed only the fields the user hasn't touched (spec 2.8.2).
+                projectName:
+                  !brd.projectNameEdited && domain ? domain.suggestedName : brd.projectName,
+                requirement:
+                  !brd.requirementEdited && domain ? domain.requirementSeed : brd.requirement,
+              },
+            }),
+          };
+        }),
+
+      setBrdProjectName: (name) =>
+        set((s) => ({
+          project: touch({
+            ...s.project,
+            brd: { ...s.project.brd, projectName: name, projectNameEdited: true },
+          }),
+        })),
+
+      setBrdRequirement: (requirement) =>
+        set((s) => ({
+          project: touch({
+            ...s.project,
+            brd: { ...s.project.brd, requirement, requirementEdited: true },
+          }),
+        })),
+
+      setBrdOutputFolder: (folder) =>
+        set((s) => ({
+          project: touch({ ...s.project, brd: { ...s.project.brd, outputFolder: folder } }),
+        })),
+
+      setBrdCreateFolder: (createFolder) =>
+        set((s) => ({
+          project: touch({ ...s.project, brd: { ...s.project.brd, createFolder } }),
+        })),
+
+      setBrdComment: (section, comment) =>
+        set((s) => ({
+          project: touch({
+            ...s.project,
+            brd: {
+              ...s.project.brd,
+              comments: { ...s.project.brd.comments, [section]: comment },
+            },
+          }),
+        })),
+
+      addBrdVersion: (doc, source, bump) => {
+        const { label, major, minor } = nextVersion(
+          useProjectStore.getState().project.brd.versions,
+          bump,
+        );
+        set((s) => ({
+          project: touch({
+            ...s.project,
+            brd: {
+              ...s.project.brd,
+              versions: [
+                ...s.project.brd.versions,
+                { label, major, minor, at: Date.now(), source, doc },
+              ],
+              activeVersion: label,
+            },
+          }),
+        }));
+        return label;
+      },
+
+      setActiveBrdVersion: (label) =>
+        set((s) => ({
+          project: touch({ ...s.project, brd: { ...s.project.brd, activeVersion: label } }),
+        })),
+
       resetProject: () => set({ project: createEmptyProject(), lastSavedAt: Date.now() }),
 
       replaceProject: (project) => set({ project: touch(project), lastSavedAt: Date.now() }),
@@ -251,6 +388,10 @@ export const useProjectStore = create<ProjectState>()(
         if (fromVersion < 3 && state?.project) {
           // v2 -> v3: add the persisted agent-results map.
           state.project.agentResults = state.project.agentResults ?? {};
+        }
+        if (fromVersion < 4 && state?.project) {
+          // v3 -> v4: add the BRD Generator workspace.
+          state.project.brd = state.project.brd ?? createEmptyBrd();
         }
         return state;
       },

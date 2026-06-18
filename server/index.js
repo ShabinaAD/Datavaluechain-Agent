@@ -16,8 +16,10 @@
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { dirname, join, isAbsolute, resolve } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync, statSync, accessSync, constants } from 'node:fs';
+import { homedir } from 'node:os';
+import { brdToDocxBuffer } from './brdDocx.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -123,6 +125,176 @@ app.post('/api/agent/run', async (req, res) => {
   } catch (err) {
     console.warn(`[agent] request failed for stage "${stage}": ${err?.name ?? 'error'}`);
     res.json({ source: 'unavailable', reason: 'request_failed' });
+  }
+});
+
+// --- BRD Generator (spec 2.x) ------------------------------------------------
+
+/** System prompt asking for strict JSON in the BRD document shape. */
+const BRD_JSON_INSTRUCTIONS = `You are a senior business analyst. Produce a complete Business Requirements Document as STRICT JSON only — no prose, no markdown fences. Use exactly this shape:
+{
+  "executiveSummary": string,
+  "businessObjectives": string[],
+  "scope": { "inScope": string[], "outOfScope": string[] },
+  "stakeholders": [{ "name": string, "role": string, "responsibility": string }],
+  "functionalRequirements": [{ "id": string, "title": string, "description": string, "priority": string }],
+  "nonFunctionalRequirements": [{ "category": string, "requirement": string, "target": string }],
+  "dataModel": { "overview": string, "entities": [{ "name": string, "attributes": string[] }] },
+  "integrations": [{ "system": string, "direction": string, "protocol": string, "description": string }],
+  "assumptions": string[],
+  "constraints": string[],
+  "risks": [{ "risk": string, "impact": string, "likelihood": string, "mitigation": string }],
+  "milestones": [{ "name": string, "targetDate": string, "deliverables": string[] }],
+  "acceptanceCriteria": string[]
+}`;
+
+function parseJsonLoose(text) {
+  if (typeof text !== 'string') return null;
+  // Strip code fences if the model wrapped the JSON.
+  const fenced = text.replace(/^```(?:json)?/i, '').replace(/```\s*$/i, '');
+  const start = fenced.indexOf('{');
+  const end = fenced.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    return JSON.parse(fenced.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Generate a structured BRD from the agent. Returns `{ source: 'ai', doc }` when
+ * the AI service produced parseable JSON; otherwise `{ source: 'unavailable' }`
+ * so the client falls back to its offline generator. Model name never leaks.
+ */
+app.post('/api/brd/generate', async (req, res) => {
+  const { domain, requirement, comments } = req.body ?? {};
+  if (typeof requirement !== 'string' || !requirement.trim()) {
+    res.status(400).json({ error: 'requirement is required' });
+    return;
+  }
+
+  if (!aiConfigured) {
+    res.json({ source: 'unavailable', reason: 'not_configured' });
+    return;
+  }
+
+  const commentLines = Object.entries(comments ?? {})
+    .filter(([, v]) => typeof v === 'string' && v.trim())
+    .map(([k, v]) => `- ${k}: ${v}`)
+    .join('\n');
+
+  const userPrompt = [
+    `Domain: ${domain || 'general'}`,
+    `Requirement:\n${requirement}`,
+    commentLines ? `Reviewer comments to incorporate:\n${commentLines}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    const upstream = await fetch(`${config.ai.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.ai.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.ai.model,
+        messages: [
+          { role: 'system', content: BRD_JSON_INSTRUCTIONS },
+          { role: 'user', content: userPrompt },
+        ],
+        response_format: { type: 'json_object' },
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!upstream.ok) {
+      console.warn(`[brd] upstream returned ${upstream.status}`);
+      res.json({ source: 'unavailable', reason: 'upstream_error' });
+      return;
+    }
+
+    const data = await upstream.json();
+    const content = data?.choices?.[0]?.message?.content ?? '';
+    const doc = parseJsonLoose(content);
+    if (!doc) {
+      res.json({ source: 'unavailable', reason: 'unparseable' });
+      return;
+    }
+    res.json({ source: 'ai', doc });
+  } catch (err) {
+    console.warn(`[brd] request failed: ${err?.name ?? 'error'}`);
+    res.json({ source: 'unavailable', reason: 'request_failed' });
+  }
+});
+
+/** Expand a leading "~" to the user's home directory. */
+function expandHome(p) {
+  if (typeof p !== 'string' || !p) return '';
+  if (p === '~') return homedir();
+  if (p.startsWith('~/') || p.startsWith('~\\')) return join(homedir(), p.slice(2));
+  return p;
+}
+
+/**
+ * Build the .docx, write it into the chosen output folder (creating it when
+ * asked), and stream it back as a download. A bad/unwritable folder returns a
+ * 400 with `{ error: 'folder' }` so the client can show a friendly banner
+ * instead of crashing (spec 2.9).
+ */
+app.post('/api/brd/docx', async (req, res) => {
+  const { doc, meta, fileName, outputFolder, createFolder } = req.body ?? {};
+  if (!doc || typeof doc !== 'object') {
+    res.status(400).json({ error: 'doc is required' });
+    return;
+  }
+
+  const safeName =
+    typeof fileName === 'string' && /\.docx$/i.test(fileName) ? fileName : 'BRD.docx';
+
+  // Resolve the requested folder; fall back to the server data dir.
+  let folder = expandHome(typeof outputFolder === 'string' ? outputFolder.trim() : '');
+  if (!folder) folder = config.dataDir;
+  folder = isAbsolute(folder) ? folder : resolve(process.cwd(), folder);
+
+  let savedPath = '';
+  try {
+    if (!existsSync(folder)) {
+      if (createFolder) {
+        mkdirSync(folder, { recursive: true });
+      } else {
+        res.status(400).json({ error: 'folder', message: 'Folder does not exist.' });
+        return;
+      }
+    } else if (!statSync(folder).isDirectory()) {
+      res.status(400).json({ error: 'folder', message: 'Path is not a folder.' });
+      return;
+    }
+    accessSync(folder, constants.W_OK);
+    savedPath = join(folder, safeName);
+  } catch {
+    res.status(400).json({ error: 'folder', message: 'Folder is not writable.' });
+    return;
+  }
+
+  try {
+    const buffer = await brdToDocxBuffer(doc, meta ?? {});
+    writeFileSync(savedPath, buffer);
+    res.setHeader(
+      'content-type',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    );
+    res.setHeader('content-disposition', `attachment; filename="${safeName}"`);
+    res.setHeader('x-saved-path', savedPath);
+    res.send(buffer);
+  } catch (err) {
+    console.warn(`[brd] docx build/write failed: ${err?.name ?? 'error'}`);
+    res.status(500).json({ error: 'docx', message: 'Could not generate the document.' });
   }
 });
 
