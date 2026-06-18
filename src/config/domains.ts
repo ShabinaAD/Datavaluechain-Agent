@@ -16,6 +16,20 @@ export interface DomainDefinition {
 
 export const DOMAINS: DomainDefinition[] = [
   {
+    id: 'life-sciences',
+    label: 'Life Sciences',
+    suggestedName: 'TrialInsight_Phase1',
+    requirementSeed: [
+      'Build a life-sciences data platform unifying clinical trial, lab, and regulatory data.',
+      '',
+      'Typical considerations for this domain:',
+      '- GxP (GCP/GLP/GMP) compliance and 21 CFR Part 11 audit trails.',
+      '- Patient and subject data privacy (consent, de-identification).',
+      '- CDISC (SDTM/ADaM) standards for clinical trial data.',
+      '- Pharmacovigilance and adverse-event reporting.',
+    ].join('\n'),
+  },
+  {
     id: 'healthcare',
     label: 'Healthcare',
     suggestedName: 'Patient360_Phase1',
