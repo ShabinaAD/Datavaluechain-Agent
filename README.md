@@ -157,7 +157,33 @@ server-side — the client only receives boolean `configured` status, surfaced i
 
 ## Deploying
 
-This is a client-side SPA. When hosting the production build statically,
-configure your host to **rewrite all unknown routes to `index.html`** so deep
-links like `/stage/modeling` resolve on refresh (e.g. a Netlify `_redirects`
-rule `/* /index.html 200`, or an equivalent rewrite on your platform).
+### Static (frontend only)
+
+When hosting just the production build statically (e.g. GitHub Pages), configure
+your host to **rewrite all unknown routes to `index.html`** so deep links like
+`/stage/modeling` resolve on refresh. In this mode the AI service is unreachable,
+so every result is the labelled **Offline fallback**.
+
+### Full app online (AI enabled)
+
+To get AI-generated ("online") results, host the **Express server**, which serves
+the built frontend *and* the API/AI proxy from a single process and port.
+
+- **Render (one service):** the repo ships a [`render.yaml`](./render.yaml)
+  blueprint. In Render: **New → Blueprint → pick this repo**, then set
+  `AI_API_KEY` when prompted. Render runs `npm ci && npm run build` then
+  `npm start`, and gives you one public URL.
+- **Docker (any host):** the repo ships a [`Dockerfile`](./Dockerfile).
+  ```bash
+  docker build -t datavaluechain-agent .
+  docker run -p 8787:8787 -e AI_API_KEY=sk-... datavaluechain-agent
+  ```
+- **Bare Node:**
+  ```bash
+  npm ci && npm run build && AI_API_KEY=sk-... npm start
+  ```
+
+The server listens on `$PORT` (default `8787`) and exposes `/api/health` for
+platform health checks. Set `AI_API_KEY` (and optionally `AI_BASE_URL` /
+`AI_MODEL`) to enable AI; without it the app still runs with the offline
+fallback.
