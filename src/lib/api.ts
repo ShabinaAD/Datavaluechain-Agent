@@ -63,6 +63,96 @@ export interface AgentResponse {
   reason?: string;
 }
 
+// --- BRD Generator (spec 2.x) ------------------------------------------------
+
+export interface BrdGeneratePayload {
+  domain: string;
+  requirement: string;
+  comments: Record<string, string>;
+}
+
+export interface BrdGenerateResponse {
+  source: 'ai' | 'unavailable';
+  /** Raw, unvalidated document; the caller coerces it into a BrdDocument. */
+  doc?: unknown;
+  reason?: string;
+}
+
+/**
+ * Ask the server to generate a structured BRD. Resolves to
+ * `{ source: 'unavailable' }` on any failure so the caller can fall back to the
+ * offline generator. Never throws.
+ */
+export async function requestBrd(payload: BrdGeneratePayload): Promise<BrdGenerateResponse> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 32_000);
+    const res = await fetch('/api/brd/generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return { source: 'unavailable', reason: `http_${res.status}` };
+    return (await res.json()) as BrdGenerateResponse;
+  } catch {
+    return { source: 'unavailable', reason: 'network' };
+  }
+}
+
+export interface DocxPayload {
+  doc: unknown;
+  meta: Record<string, unknown>;
+  fileName: string;
+  outputFolder: string;
+  createFolder: boolean;
+}
+
+export type DocxResult =
+  | { status: 'ok'; blob: Blob; savedPath: string | null }
+  | { status: 'folder_error'; message: string }
+  | { status: 'server_unavailable' }
+  | { status: 'error'; message: string };
+
+/**
+ * Ask the server to build the .docx, save it to the chosen folder, and return
+ * the file bytes. Distinguishes a friendly folder problem (so the UI can warn)
+ * from the server simply being unreachable (so the UI can build the file
+ * client-side as an offline fallback).
+ */
+export async function downloadDocxOnServer(payload: DocxPayload): Promise<DocxResult> {
+  let res: Response;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20_000);
+    res = await fetch('/api/brd/docx', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+  } catch {
+    return { status: 'server_unavailable' };
+  }
+
+  if (res.ok) {
+    const blob = await res.blob();
+    return { status: 'ok', blob, savedPath: res.headers.get('x-saved-path') };
+  }
+  // A 400 with a folder error is a friendly, expected case (spec 2.9).
+  try {
+    const body = (await res.json()) as { error?: string; message?: string };
+    if (body.error === 'folder') {
+      return { status: 'folder_error', message: body.message ?? 'Folder is not usable.' };
+    }
+    return { status: 'error', message: body.message ?? `Server error (${res.status}).` };
+  } catch {
+    return { status: 'error', message: `Server error (${res.status}).` };
+  }
+}
+
 /**
  * Asks the server to run an agent. Resolves to `{ source: 'unavailable' }` on any
  * failure so the caller can use a local fallback. Never throws.

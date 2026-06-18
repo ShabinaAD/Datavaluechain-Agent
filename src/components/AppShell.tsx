@@ -15,7 +15,7 @@ export function AppShell() {
       <TopTabs />
       <main className="flex-1 overflow-y-auto">
         <BannerHost />
-        <div className="mx-auto max-w-5xl animate-fade-in px-6 py-8">
+        <div className="mx-auto max-w-6xl animate-fade-in px-6 py-8">
           <Outlet />
         </div>
       </main>

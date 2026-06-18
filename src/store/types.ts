@@ -72,6 +72,119 @@ export interface StageResult {
   at: number;
 }
 
+/**
+ * --- BRD Generator (spec 2.x) ------------------------------------------------
+ * The first feature tab. A structured Business Requirements Document is built
+ * by the agent, revised through per-section reviewer comments, versioned, and
+ * exported to .docx. Everything except the uploaded files is persisted so the
+ * whole workspace survives a refresh (spec 2.8.3).
+ */
+
+/** Ordered, named sections of the rendered BRD (spec 2.6.2). */
+export type BrdSectionId =
+  | 'executiveSummary'
+  | 'businessObjectives'
+  | 'scope'
+  | 'stakeholders'
+  | 'functionalRequirements'
+  | 'nonFunctionalRequirements'
+  | 'dataModel'
+  | 'integrations'
+  | 'assumptionsConstraints'
+  | 'risks'
+  | 'timeline'
+  | 'acceptanceCriteria';
+
+export interface BrdStakeholder {
+  name: string;
+  role: string;
+  responsibility: string;
+}
+
+export interface BrdFunctionalRequirement {
+  id: string;
+  title: string;
+  description: string;
+  priority: string;
+}
+
+export interface BrdNonFunctionalRequirement {
+  category: string;
+  requirement: string;
+  target: string;
+}
+
+export interface BrdEntity {
+  name: string;
+  attributes: string[];
+}
+
+export interface BrdIntegration {
+  system: string;
+  direction: string;
+  protocol: string;
+  description: string;
+}
+
+export interface BrdRisk {
+  risk: string;
+  impact: string;
+  likelihood: string;
+  mitigation: string;
+}
+
+export interface BrdMilestone {
+  name: string;
+  targetDate: string;
+  deliverables: string[];
+}
+
+/** The structured BRD content, one field per named section. */
+export interface BrdDocument {
+  executiveSummary: string;
+  businessObjectives: string[];
+  scope: { inScope: string[]; outOfScope: string[] };
+  stakeholders: BrdStakeholder[];
+  functionalRequirements: BrdFunctionalRequirement[];
+  nonFunctionalRequirements: BrdNonFunctionalRequirement[];
+  dataModel: { overview: string; entities: BrdEntity[] };
+  integrations: BrdIntegration[];
+  assumptions: string[];
+  constraints: string[];
+  risks: BrdRisk[];
+  milestones: BrdMilestone[];
+  acceptanceCriteria: string[];
+}
+
+/** A single generated revision, kept in history so any version can be revisited. */
+export interface BrdVersion {
+  /** Display label, e.g. "1.2". */
+  label: string;
+  major: number;
+  minor: number;
+  at: number;
+  source: ResultSource;
+  doc: BrdDocument;
+}
+
+/** All persisted BRD state for the tab (spec 2.8.3). */
+export interface BrdState {
+  domain: string;
+  projectName: string;
+  /** True once the user manually edits the name; stops domain auto-seed (2.8.2). */
+  projectNameEdited: boolean;
+  requirement: string;
+  /** True once the user manually edits the requirement; stops domain auto-seed. */
+  requirementEdited: boolean;
+  outputFolder: string;
+  createFolder: boolean;
+  versions: BrdVersion[];
+  /** Label of the version currently shown in the output column. */
+  activeVersion: string | null;
+  /** Per-section reviewer comments, keyed by section id (2.6.4). */
+  comments: Partial<Record<BrdSectionId, string>>;
+}
+
 export interface Project {
   /** Stable id; lets us key persisted blobs and future multi-project support. */
   id: string;
@@ -87,6 +200,8 @@ export interface Project {
   stageMeta: Record<StageId, StageMeta>;
   /** Persisted agent output per stage, so results survive a refresh. */
   agentResults: Partial<Record<StageId, StageResult>>;
+  /** BRD Generator workspace (spec 2.x). */
+  brd: BrdState;
 }
 
 export type ThemeMode = 'light' | 'dark';
