@@ -1,5 +1,12 @@
 # Data Value Chain Agent Foundry
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ShabinaAD/Datavaluechain-Agent)
+
+> One-click hosting: click **Deploy to Render** above, sign in with GitHub,
+> paste your `AI_API_KEY` (and `AI_BASE_URL` / `AI_MODEL` if not OpenAI), and
+> Render builds and serves the full app — frontend, API, and AI proxy — at one
+> public URL. See [Deploying](#deploying) for Docker / bare-Node alternatives.
+
 An internal studio that takes a data-and-analytics team from **business
 requirements all the way to a working dashboard**, in one place. Each stage of
 the value chain is owned by a dedicated AI agent, so the weeks normally lost to
