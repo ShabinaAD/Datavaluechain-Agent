@@ -9,10 +9,8 @@ import type { ThemeMode } from './types';
  */
 interface UIState {
   theme: ThemeMode;
-  sidebarCollapsed: boolean;
   toggleTheme: () => void;
   setTheme: (theme: ThemeMode) => void;
-  toggleSidebar: () => void;
 }
 
 function getSystemTheme(): ThemeMode {
@@ -26,10 +24,8 @@ export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
       theme: getSystemTheme(),
-      sidebarCollapsed: false,
       toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
       setTheme: (theme) => set({ theme }),
-      toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
     }),
     {
       name: 'dvcaf.ui',

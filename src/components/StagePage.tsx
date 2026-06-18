@@ -3,6 +3,7 @@ import { STAGE_BY_ID, stageIndex, WORKFLOW_STAGES } from '../config/workflow';
 import type { StageId } from '../store/types';
 import { PageHeader } from './PageHeader';
 import { StageNav } from './StageNav';
+import { AgentPanel } from './AgentPanel';
 import { StatusBadge } from './ui/StatusBadge';
 import { useProjectStore } from '../store/projectStore';
 
@@ -20,7 +21,10 @@ export function StagePage({ stageId, children }: { stageId: StageId; children: R
         description={stage.blurb}
         actions={<StatusBadge status={status} />}
       />
-      {children}
+      <div className="space-y-6">
+        {children}
+        <AgentPanel stageId={stageId} />
+      </div>
       <StageNav stageId={stageId} />
     </div>
   );

@@ -1,6 +1,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { HydrationGate } from './components/HydrationGate';
+import { SessionGate } from './components/SessionGate';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { useApplyTheme } from './hooks/useApplyTheme';
 import { Overview } from './pages/Overview';
 import { Requirements } from './pages/Requirements';
@@ -16,22 +18,26 @@ export default function App() {
   useApplyTheme();
 
   return (
-    <HydrationGate>
-      <Routes>
-        <Route element={<AppShell />}>
-          <Route index element={<Overview />} />
-          <Route path="stage/requirements" element={<Requirements />} />
-          <Route path="stage/sources" element={<Sources />} />
-          <Route path="stage/engineering" element={<Engineering />} />
-          <Route path="stage/modeling" element={<Modeling />} />
-          <Route path="stage/dashboard" element={<Dashboard />} />
-          <Route path="stage/publish" element={<Publish />} />
-          <Route path="settings" element={<Settings />} />
-          {/* Legacy/short links land on the overview. */}
-          <Route path="stage" element={<Navigate to="/stage/requirements" replace />} />
-          <Route path="*" element={<NotFound />} />
-        </Route>
-      </Routes>
-    </HydrationGate>
+    <ErrorBoundary>
+      <HydrationGate>
+        <SessionGate>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route index element={<Overview />} />
+              <Route path="stage/requirements" element={<Requirements />} />
+              <Route path="stage/sources" element={<Sources />} />
+              <Route path="stage/engineering" element={<Engineering />} />
+              <Route path="stage/modeling" element={<Modeling />} />
+              <Route path="stage/dashboard" element={<Dashboard />} />
+              <Route path="stage/publish" element={<Publish />} />
+              <Route path="settings" element={<Settings />} />
+              {/* Legacy/short links land on the overview. */}
+              <Route path="stage" element={<Navigate to="/stage/requirements" replace />} />
+              <Route path="*" element={<NotFound />} />
+            </Route>
+          </Routes>
+        </SessionGate>
+      </HydrationGate>
+    </ErrorBoundary>
   );
 }

@@ -4,9 +4,27 @@ import { Card, CardBody, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { useProjectStore } from '../store/projectStore';
 import { useUIStore } from '../store/uiStore';
+import { useRuntimeStore } from '../store/runtimeStore';
 import { downloadProjectBackup, readProjectBackup } from '../lib/backup';
 import { formatTimestamp } from '../lib/format';
+import { cn } from '../lib/cn';
 import { SunIcon, MoonIcon, ShieldCheckIcon } from '../icons';
+
+function StatusPill({ ok, okLabel, offLabel }: { ok: boolean; okLabel: string; offLabel: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium',
+        ok
+          ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300'
+          : 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300',
+      )}
+    >
+      <span className={cn('h-1.5 w-1.5 rounded-full', ok ? 'bg-emerald-500' : 'bg-amber-500')} />
+      {ok ? okLabel : offLabel}
+    </span>
+  );
+}
 
 export function Settings() {
   const project = useProjectStore((s) => s.project);
@@ -15,6 +33,7 @@ export function Settings() {
   const replaceProject = useProjectStore((s) => s.replaceProject);
   const theme = useUIStore((s) => s.theme);
   const setTheme = useUIStore((s) => s.setTheme);
+  const runtime = useRuntimeStore();
 
   const fileInput = useRef<HTMLInputElement>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -55,6 +74,57 @@ export function Settings() {
             >
               Dark
             </Button>
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Environment & connections"
+            description="Configured by your IT team via environment variables and read at startup. Everything has a working default, so the app loads even when nothing is connected."
+          />
+          <CardBody className="space-y-3">
+            <div className="flex items-center justify-between gap-4 rounded-lg bg-surface-muted px-4 py-3 text-sm">
+              <div>
+                <p className="font-medium text-content">Application server</p>
+                <p className="text-content-muted">
+                  Powers the “state survives refresh, dies with the server” rule.
+                </p>
+              </div>
+              <StatusPill ok={runtime.serverOnline} okLabel="Connected" offLabel="Offline" />
+            </div>
+            <div className="flex items-center justify-between gap-4 rounded-lg bg-surface-muted px-4 py-3 text-sm">
+              <div>
+                <p className="font-medium text-content">AI service</p>
+                <p className="text-content-muted">
+                  Set <code className="font-mono text-xs">AI_API_KEY</code>. When absent, the Agent
+                  uses an offline fallback.
+                </p>
+              </div>
+              <StatusPill
+                ok={runtime.config.ai.configured}
+                okLabel="Connected"
+                offLabel="Offline fallback"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4 rounded-lg bg-surface-muted px-4 py-3 text-sm">
+              <div>
+                <p className="font-medium text-content">Database</p>
+                <p className="text-content-muted">
+                  Set <code className="font-mono text-xs">DATABASE_URL</code>. When absent, source
+                  tabs show “Connect first”.
+                </p>
+              </div>
+              <StatusPill
+                ok={runtime.config.database.configured}
+                okLabel="Connected"
+                offLabel="Connect first"
+              />
+            </div>
+            {runtime.config.storage.dataDir && (
+              <p className="text-xs text-content-muted">
+                Data folder: <code className="font-mono">{runtime.config.storage.dataDir}</code>
+              </p>
+            )}
           </CardBody>
         </Card>
 
