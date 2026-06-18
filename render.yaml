@@ -1,0 +1,24 @@
+# Render Blueprint: deploys the full app (frontend + Express API + AI proxy)
+# as a single web service. In the Render dashboard: New > Blueprint > pick this
+# repo, then set AI_API_KEY (and optionally AI_BASE_URL / AI_MODEL).
+services:
+  - type: web
+    name: datavaluechain-agent
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Required for AI ("online") generation. Marked sync:false so Render
+      # prompts you to paste the secret instead of storing it in git.
+      - key: AI_API_KEY
+        sync: false
+      # Optional overrides — defaults to OpenAI.
+      - key: AI_BASE_URL
+        sync: false
+      - key: AI_MODEL
+        sync: false
