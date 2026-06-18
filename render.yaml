@@ -6,7 +6,9 @@ services:
     name: datavaluechain-agent
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run build
+    # --include=dev so build tools (tsc, vite, @types/*) install even though
+    # NODE_ENV=production (which would otherwise skip devDependencies).
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
     autoDeploy: true
