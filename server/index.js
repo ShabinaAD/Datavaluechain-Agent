@@ -336,6 +336,105 @@ app.post('/api/model/generate', async (req, res) => {
   }
 });
 
+// --- Logical Data Modeler (spec 3.x, logical layer) --------------------------
+
+/** System prompt asking for a rigorous, platform-agnostic logical model as strict JSON. */
+const LOGICAL_JSON_INSTRUCTIONS = `You are a Principal Data Modeler with 20+ years across multiple industries. You know Kimball dimensional and Inmon 3NF cold; you default to 3NF for the logical layer and note where dimensional patterns fit better.
+
+Produce a RIGOROUS LOGICAL DATA MODEL from the BRD + the attached Conceptual Model. Name entities, typed attributes, and explicit PK/FK relationships — but PLATFORM-AGNOSTIC (no VARIANT/STRUCT/GEOGRAPHY, no partitioning/clustering).
+
+STRICT GROUNDING. Inputs: BRD FULL TEXT + CONCEPTUAL MODEL (authoritative entity set).
+1. EVERY conceptual entity appears in the logical model; you may split one conceptual entity into multiple 3NF tables (e.g. Patient → Patient, Patient_Address, Patient_Insurance) but never drop/rename without a counterpart.
+2. Attributes/types/relationships trace to the BRD body or the Conceptual key attributes. Standard audit columns allowed, marked "(standard audit column — not explicitly in BRD)".
+3. Platform-agnostic types ONLY: INTEGER, BIGINT, DECIMAL(p,s), VARCHAR(n), TEXT, DATE, TIME, TIMESTAMP, BOOLEAN, UUID. No NUMBER/NVARCHAR2/CLOB/STRUCT/VARIANT/GEOGRAPHY.
+4. Every table has exactly ONE primary key (surrogate <table_snake>_id BIGINT by default); flag natural keys with is_business_key:true.
+5. Every foreign key references a real attribute in another table — no dangling FKs.
+6. Domain-appropriate attribute naming; snake_case attributes, PascalCase entities.
+7. NO Bronze/Silver/Gold layers here.
+
+ENTITY TYPES: Dimension|Fact|Bridge|Hierarchy|Reference|Event. Relationships: cardinality 1:1|1:N|N:1|N:N + identifying:true/false. For N:N create a Bridge table and emit two 1:N edges (never a direct N:N). Every FK column has a matching relationship with concrete from_attribute/to_attribute.
+
+SIZE: 10–25 entities (1.5–2x conceptual for 3NF splits/bridges); 5–15 attributes each; 15–40 relationships; no orphans (lookups may stand alone); 2–4 sentence overview.
+
+Return ONLY this JSON object (no prose, no markdown fences):
+{ "name", "domain", "version", "overview", "normalization":"3NF|Dimensional (Kimball)|Hybrid",
+  "entities":[{"name","type","description",
+    "attributes":[{"name","data_type","nullable","is_primary_key","is_business_key","is_foreign_key",
+                   "references":{"entity","attribute"}|null,"description"}]}],
+  "relationships":[{"from","to","from_attribute","to_attribute","cardinality","identifying","label"}] }
+Every relationship from/to MUST match an entity name exactly, and every from_attribute/to_attribute MUST match a real attribute (validated downstream).`;
+
+/**
+ * Generate a logical data model from the agent (same AI config as the BRD +
+ * conceptual endpoints). Returns `{ source: 'ai', doc }` when the AI produced
+ * parseable JSON; otherwise `{ source: 'unavailable' }` so the client falls back
+ * to its offline derivation from the conceptual model.
+ */
+app.post('/api/logical/generate', async (req, res) => {
+  const { domainLabel, projectName, brdText, conceptualModel, revisionNote } = req.body ?? {};
+  if (typeof conceptualModel !== 'string' || !conceptualModel.trim()) {
+    res.status(400).json({ error: 'conceptualModel is required' });
+    return;
+  }
+
+  if (!aiConfigured) {
+    res.json({ source: 'unavailable', reason: 'not_configured' });
+    return;
+  }
+
+  const userPrompt = [
+    `Domain: ${domainLabel || 'General'}`,
+    projectName ? `Project name: ${projectName}` : '',
+    typeof brdText === 'string' && brdText.trim() ? `BRD:\n${brdText}` : '',
+    `Conceptual model (authoritative entity set):\n${conceptualModel}`,
+    typeof revisionNote === 'string' && revisionNote.trim()
+      ? `Reviewer revision request to incorporate:\n${revisionNote}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    const upstream = await fetch(`${config.ai.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.ai.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.ai.model,
+        messages: [
+          { role: 'system', content: LOGICAL_JSON_INSTRUCTIONS },
+          { role: 'user', content: userPrompt },
+        ],
+        response_format: { type: 'json_object' },
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!upstream.ok) {
+      console.warn(`[logical] upstream returned ${upstream.status}`);
+      res.json({ source: 'unavailable', reason: 'upstream_error' });
+      return;
+    }
+
+    const data = await upstream.json();
+    const content = data?.choices?.[0]?.message?.content ?? '';
+    const doc = parseJsonLoose(content);
+    if (!doc) {
+      res.json({ source: 'unavailable', reason: 'unparseable' });
+      return;
+    }
+    res.json({ source: 'ai', doc });
+  } catch (err) {
+    console.warn(`[logical] request failed: ${err?.name ?? 'error'}`);
+    res.json({ source: 'unavailable', reason: 'request_failed' });
+  }
+});
+
 /** Expand a leading "~" to the user's home directory. */
 function expandHome(p) {
   if (typeof p !== 'string' || !p) return '';

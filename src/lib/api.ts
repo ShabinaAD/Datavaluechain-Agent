@@ -147,6 +147,51 @@ export async function requestModel(
   }
 }
 
+// --- Logical Data Modeler (spec 3.x, logical layer) --------------------------
+
+export interface LogicalGeneratePayload {
+  domain: string;
+  domainLabel: string;
+  projectName: string;
+  /** A digest of the BRD the model must be grounded in. */
+  brdText: string;
+  /** The authoritative conceptual model (JSON) the logical model must cover. */
+  conceptualModel: string;
+  revisionNote: string;
+}
+
+export interface LogicalGenerateResponse {
+  source: 'ai' | 'unavailable';
+  /** Raw, unvalidated model; the caller coerces it into a LogicalModel. */
+  doc?: unknown;
+  reason?: string;
+}
+
+/**
+ * Ask the server to generate a logical data model. Resolves to
+ * `{ source: 'unavailable' }` on any failure so the caller can fall back to the
+ * offline generator. Never throws.
+ */
+export async function requestLogical(
+  payload: LogicalGeneratePayload,
+): Promise<LogicalGenerateResponse> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 32_000);
+    const res = await fetch('/api/logical/generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return { source: 'unavailable', reason: `http_${res.status}` };
+    return (await res.json()) as LogicalGenerateResponse;
+  } catch {
+    return { source: 'unavailable', reason: 'network' };
+  }
+}
+
 export interface DocxPayload {
   doc: unknown;
   meta: Record<string, unknown>;

@@ -9,6 +9,8 @@ import type {
   DashboardPlan,
   DataSource,
   EngineeringPlan,
+  LogicalModel,
+  LogicalState,
   ModelState,
   ModelingPlan,
   Project,
@@ -41,7 +43,8 @@ const STORAGE_KEY = 'dvcaf.project';
 // v3 introduced persisted per-stage agent results.
 // v4 introduced the BRD Generator workspace.
 // v5 introduced the Conceptual Data Modeler workspace.
-const STORAGE_VERSION = 5;
+// v6 introduced the Logical Data Modeler workspace.
+const STORAGE_VERSION = 6;
 
 /** Sensible default output folder for the .docx export (spec 2.5.7). */
 const DEFAULT_OUTPUT_FOLDER = '~/Downloads/BRD';
@@ -89,6 +92,16 @@ export function createEmptyModel(): ModelState {
   };
 }
 
+/** A fresh Logical Data Modeler workspace, seeded from the default domain. */
+export function createEmptyLogical(): LogicalState {
+  return {
+    domain: DEFAULT_DOMAIN_ID,
+    versions: [],
+    activeVersion: null,
+    revisionNote: '',
+  };
+}
+
 function emptyStageMeta(): Record<StageId, StageMeta> {
   return WORKFLOW_STAGES.reduce(
     (acc, stage) => {
@@ -116,6 +129,7 @@ export function createEmptyProject(): Project {
     agentResults: {},
     brd: createEmptyBrd(),
     model: createEmptyModel(),
+    logical: createEmptyLogical(),
   };
 }
 
@@ -163,6 +177,13 @@ interface ProjectState {
   /** Append a generated model revision and make it active; computes the version bump. */
   addModelVersion: (doc: ConceptualModel, source: ResultSource, bump: 'minor' | 'major') => string;
   setActiveModelVersion: (label: string) => void;
+
+  // --- Logical Data Modeler (spec 3.x, logical layer) ---
+  setLogicalDomain: (domainId: string) => void;
+  setLogicalRevisionNote: (note: string) => void;
+  /** Append a generated logical revision and make it active; computes the version bump. */
+  addLogicalVersion: (doc: LogicalModel, source: ResultSource, bump: 'minor' | 'major') => string;
+  setActiveLogicalVersion: (label: string) => void;
 
   resetProject: () => void;
   /** Replace the whole project, e.g. when restoring from a backup file. */
@@ -409,6 +430,42 @@ export const useProjectStore = create<ProjectState>()(
           project: touch({ ...s.project, model: { ...s.project.model, activeVersion: label } }),
         })),
 
+      setLogicalDomain: (domainId) =>
+        set((s) => ({
+          project: touch({ ...s.project, logical: { ...s.project.logical, domain: domainId } }),
+        })),
+
+      setLogicalRevisionNote: (note) =>
+        set((s) => ({
+          project: touch({ ...s.project, logical: { ...s.project.logical, revisionNote: note } }),
+        })),
+
+      addLogicalVersion: (doc, source, bump) => {
+        const { label, major, minor } = nextVersion(
+          useProjectStore.getState().project.logical.versions,
+          bump,
+        );
+        set((s) => ({
+          project: touch({
+            ...s.project,
+            logical: {
+              ...s.project.logical,
+              versions: [
+                ...s.project.logical.versions,
+                { label, major, minor, at: Date.now(), source, doc: { ...doc, version: label } },
+              ],
+              activeVersion: label,
+            },
+          }),
+        }));
+        return label;
+      },
+
+      setActiveLogicalVersion: (label) =>
+        set((s) => ({
+          project: touch({ ...s.project, logical: { ...s.project.logical, activeVersion: label } }),
+        })),
+
       resetProject: () => set({ project: createEmptyProject(), lastSavedAt: Date.now() }),
 
       replaceProject: (project) => set({ project: touch(project), lastSavedAt: Date.now() }),
@@ -453,6 +510,10 @@ export const useProjectStore = create<ProjectState>()(
         if (fromVersion < 5 && state?.project) {
           // v4 -> v5: add the Conceptual Data Modeler workspace.
           state.project.model = state.project.model ?? createEmptyModel();
+        }
+        if (fromVersion < 6 && state?.project) {
+          // v5 -> v6: add the Logical Data Modeler workspace.
+          state.project.logical = state.project.logical ?? createEmptyLogical();
         }
         return state;
       },
