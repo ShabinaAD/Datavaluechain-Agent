@@ -1,10 +1,52 @@
+import { useState } from 'react';
 import { ModelGenerator } from '../components/model/ModelGenerator';
+import { LogicalGenerator } from '../components/model/LogicalGenerator';
+import { useProjectStore } from '../store/projectStore';
+
+type ModelStage = 'conceptual' | 'logical';
 
 /**
- * The Modeling tab is the Conceptual Data Modeler (spec 3.x): it reads the
- * generated BRD and produces a rigorous, domain-aware conceptual data model —
- * business entities and relationships — with an ER diagram and version history.
+ * The Modeling tab hosts two stages of the data modeler (spec 3.x):
+ *   - Conceptual: business entities + relationships, grounded in the BRD.
+ *   - Logical: a platform-agnostic 3NF/dimensional model derived from the
+ *     conceptual one (typed attributes, PK/FK, bridge tables).
+ * The logical stage takes the conceptual model as its authoritative input.
  */
 export function Modeling() {
-  return <ModelGenerator />;
+  const [stage, setStage] = useState<ModelStage>('conceptual');
+  const conceptualCount = useProjectStore((s) => s.project.model.versions.length);
+  const logicalCount = useProjectStore((s) => s.project.logical.versions.length);
+
+  const tabs: { id: ModelStage; label: string; count: number }[] = [
+    { id: 'conceptual', label: 'Conceptual', count: conceptualCount },
+    { id: 'logical', label: 'Logical', count: logicalCount },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="inline-flex rounded-lg border border-border bg-surface-muted/40 p-1">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setStage(t.id)}
+            className={`flex items-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+              stage === t.id
+                ? 'bg-surface text-content shadow-sm'
+                : 'text-content-muted hover:text-content'
+            }`}
+          >
+            {t.label}
+            {t.count > 0 && (
+              <span className="rounded-full bg-brand-50 px-1.5 text-[11px] font-semibold text-brand-700 dark:bg-brand-950/50 dark:text-brand-200">
+                {t.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {stage === 'conceptual' ? <ModelGenerator /> : <LogicalGenerator />}
+    </div>
+  );
 }

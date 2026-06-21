@@ -254,6 +254,100 @@ export interface ModelState {
   revisionNote: string;
 }
 
+/**
+ * --- Logical Data Modeler (spec 3.x, logical layer) -------------------------
+ * Takes the BRD + the conceptual model and produces a RIGOROUS, platform-agnostic
+ * logical model: typed attributes, explicit single-column PKs, and concrete
+ * PK/FK relationships (N:N resolved into bridge tables). Versioned + persisted.
+ */
+
+/** Platform-agnostic logical data types. The `(p,s)`/`(n)` params live on the string. */
+export type LogicalBaseType =
+  | 'INTEGER'
+  | 'BIGINT'
+  | 'DECIMAL'
+  | 'VARCHAR'
+  | 'TEXT'
+  | 'DATE'
+  | 'TIME'
+  | 'TIMESTAMP'
+  | 'BOOLEAN'
+  | 'UUID';
+
+/** Normalization strategy for the logical layer. */
+export type Normalization = '3NF' | 'Dimensional (Kimball)' | 'Hybrid';
+
+export interface LogicalAttributeRef {
+  /** Referenced `LogicalEntity.name`. */
+  entity: string;
+  /** Referenced `LogicalAttribute.name`. */
+  attribute: string;
+}
+
+export interface LogicalAttribute {
+  name: string;
+  /** Concrete platform-agnostic type, e.g. "BIGINT", "VARCHAR(255)", "DECIMAL(12,2)". */
+  dataType: string;
+  nullable: boolean;
+  isPrimaryKey: boolean;
+  /** A natural/business key (e.g. claim_number, provider_npi). */
+  isBusinessKey: boolean;
+  isForeignKey: boolean;
+  /** FK target; null unless `isForeignKey`. */
+  references: LogicalAttributeRef | null;
+  description: string;
+}
+
+export interface LogicalEntity {
+  name: string;
+  type: ModelEntityType;
+  description: string;
+  attributes: LogicalAttribute[];
+}
+
+export interface LogicalRelationship {
+  /** Must match a `LogicalEntity.name` exactly. */
+  from: string;
+  /** Must match a `LogicalEntity.name` exactly. */
+  to: string;
+  /** FK column on `from` (or the parent key, depending on direction). */
+  fromAttribute: string;
+  /** Referenced column on `to`. */
+  toAttribute: string;
+  cardinality: ModelCardinality;
+  /** Identifying (the FK is part of the child PK) vs non-identifying. */
+  identifying: boolean;
+  label: string;
+}
+
+/** A complete logical data model. */
+export interface LogicalModel {
+  name: string;
+  domain: string;
+  version: string;
+  overview: string;
+  normalization: Normalization;
+  entities: LogicalEntity[];
+  relationships: LogicalRelationship[];
+}
+
+export interface LogicalVersion {
+  label: string;
+  major: number;
+  minor: number;
+  at: number;
+  source: ResultSource;
+  doc: LogicalModel;
+}
+
+/** All persisted Logical Data Modeler state for the tab. */
+export interface LogicalState {
+  domain: string;
+  versions: LogicalVersion[];
+  activeVersion: string | null;
+  revisionNote: string;
+}
+
 export interface Project {
   /** Stable id; lets us key persisted blobs and future multi-project support. */
   id: string;
@@ -273,6 +367,8 @@ export interface Project {
   brd: BrdState;
   /** Conceptual Data Modeler workspace (spec 3.x). */
   model: ModelState;
+  /** Logical Data Modeler workspace (spec 3.x, logical layer). */
+  logical: LogicalState;
 }
 
 export type ThemeMode = 'light' | 'dark';
