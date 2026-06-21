@@ -233,6 +233,109 @@ app.post('/api/brd/generate', async (req, res) => {
   }
 });
 
+// --- Conceptual Data Modeler (spec 3.x) --------------------------------------
+
+/** System prompt asking for a rigorous, grounded conceptual model as strict JSON. */
+const MODEL_JSON_INSTRUCTIONS = `You are a Principal Data Modeler with 20+ years building conceptual, logical, and physical data models. Produce a RIGOROUS CONCEPTUAL DATA MODEL for the project described in the BRD below.
+
+A conceptual model names business entities and relationships only — NO attributes-as-columns, NO physical types, NO table implementation. Stay at "what is this thing and how does it relate".
+
+STRICT GROUNDING — NO HALLUCINATIONS:
+1. Every entity must trace to the BRD (its data model, scope, objectives, KPIs, functional requirements, integrations, or stakeholders). Do not introduce entities the BRD doesn't mention or imply.
+2. You MAY add industry-standard bridging entities (e.g. Order-Line, Encounter-Diagnosis) to connect the model; mark such an entity's description with "(derived from standard <domain> model — not explicitly in BRD)".
+3. Use the domain's standard entity vocabulary (provided below) where it fits.
+4. Relationships use cardinality "1:1" | "1:N" | "N:1" | "N:N" plus a short business label ("has", "submits", "covers", "diagnosed with").
+5. Classify every entity as one of: Dimension | Fact | Bridge | Hierarchy | Reference | Event.
+6. 3–7 conceptual key attributes per entity — business identifiers/descriptors in Title Case (no snake_case, no types, no lengths).
+7. No Bronze/Silver/Gold layers (physical concern). No real person/organization names, no sample rows.
+
+SIZE: 8–15 entities (aim 10–12); 10–20 relationships; no orphan entities; a 2–4 sentence overview; 1–2 sentence entity descriptions.
+
+Return ONLY this JSON object (no prose, no markdown fences):
+{
+  "name": string,
+  "domain": string,
+  "version": string,
+  "overview": string,
+  "entities": [{ "name": string, "type": "Dimension|Fact|Bridge|Hierarchy|Reference|Event", "description": string, "keyAttributes": string[] }],
+  "relationships": [{ "from": string, "to": string, "cardinality": "1:1|1:N|N:1|N:N", "label": string }]
+}
+Every relationship "from"/"to" MUST match an entity "name" exactly (validated downstream).`;
+
+/**
+ * Generate a conceptual data model from the agent. Returns `{ source: 'ai', doc }`
+ * when the AI service produced parseable JSON; otherwise `{ source: 'unavailable' }`
+ * so the client falls back to its offline, domain-aware generator.
+ */
+app.post('/api/model/generate', async (req, res) => {
+  const { domainLabel, projectName, brdText, vocabularyHint, revisionNote } = req.body ?? {};
+  if (typeof brdText !== 'string' || !brdText.trim()) {
+    res.status(400).json({ error: 'brdText is required' });
+    return;
+  }
+
+  if (!aiConfigured) {
+    res.json({ source: 'unavailable', reason: 'not_configured' });
+    return;
+  }
+
+  const vocab = Array.isArray(vocabularyHint)
+    ? vocabularyHint.filter((v) => typeof v === 'string').join(', ')
+    : '';
+
+  const userPrompt = [
+    `Domain: ${domainLabel || 'General'}`,
+    projectName ? `Project name: ${projectName}` : '',
+    vocab ? `Standard ${domainLabel || ''} entity vocabulary to draw on: ${vocab}` : '',
+    `BRD (ground every entity in this):\n${brdText}`,
+    typeof revisionNote === 'string' && revisionNote.trim()
+      ? `Reviewer revision request to incorporate:\n${revisionNote}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    const upstream = await fetch(`${config.ai.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.ai.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.ai.model,
+        messages: [
+          { role: 'system', content: MODEL_JSON_INSTRUCTIONS },
+          { role: 'user', content: userPrompt },
+        ],
+        response_format: { type: 'json_object' },
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!upstream.ok) {
+      console.warn(`[model] upstream returned ${upstream.status}`);
+      res.json({ source: 'unavailable', reason: 'upstream_error' });
+      return;
+    }
+
+    const data = await upstream.json();
+    const content = data?.choices?.[0]?.message?.content ?? '';
+    const doc = parseJsonLoose(content);
+    if (!doc) {
+      res.json({ source: 'unavailable', reason: 'unparseable' });
+      return;
+    }
+    res.json({ source: 'ai', doc });
+  } catch (err) {
+    console.warn(`[model] request failed: ${err?.name ?? 'error'}`);
+    res.json({ source: 'unavailable', reason: 'request_failed' });
+  }
+});
+
 /** Expand a leading "~" to the user's home directory. */
 function expandHome(p) {
   if (typeof p !== 'string' || !p) return '';

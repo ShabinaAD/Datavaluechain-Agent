@@ -101,6 +101,52 @@ export async function requestBrd(payload: BrdGeneratePayload): Promise<BrdGenera
   }
 }
 
+// --- Conceptual Data Modeler (spec 3.x) --------------------------------------
+
+export interface ModelGeneratePayload {
+  domain: string;
+  /** Domain label shown in the model (e.g. "Healthcare"). */
+  domainLabel: string;
+  projectName: string;
+  /** A digest of the BRD the model must be grounded in. */
+  brdText: string;
+  /** Standard entity vocabulary for the domain, to steer the agent. */
+  vocabularyHint: string[];
+  revisionNote: string;
+}
+
+export interface ModelGenerateResponse {
+  source: 'ai' | 'unavailable';
+  /** Raw, unvalidated model; the caller coerces it into a ConceptualModel. */
+  doc?: unknown;
+  reason?: string;
+}
+
+/**
+ * Ask the server to generate a conceptual data model. Resolves to
+ * `{ source: 'unavailable' }` on any failure so the caller can fall back to the
+ * offline generator. Never throws.
+ */
+export async function requestModel(
+  payload: ModelGeneratePayload,
+): Promise<ModelGenerateResponse> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 32_000);
+    const res = await fetch('/api/model/generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return { source: 'unavailable', reason: `http_${res.status}` };
+    return (await res.json()) as ModelGenerateResponse;
+  } catch {
+    return { source: 'unavailable', reason: 'network' };
+  }
+}
+
 export interface DocxPayload {
   doc: unknown;
   meta: Record<string, unknown>;
