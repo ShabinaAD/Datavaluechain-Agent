@@ -5,9 +5,11 @@ import type {
   BrdSectionId,
   BrdState,
   BusinessRequirements,
+  ConceptualModel,
   DashboardPlan,
   DataSource,
   EngineeringPlan,
+  ModelState,
   ModelingPlan,
   Project,
   ResultSource,
@@ -38,7 +40,8 @@ const STORAGE_KEY = 'dvcaf.project';
 // v2 introduced the dedicated "Data Engineering" stage.
 // v3 introduced persisted per-stage agent results.
 // v4 introduced the BRD Generator workspace.
-const STORAGE_VERSION = 4;
+// v5 introduced the Conceptual Data Modeler workspace.
+const STORAGE_VERSION = 5;
 
 /** Sensible default output folder for the .docx export (spec 2.5.7). */
 const DEFAULT_OUTPUT_FOLDER = '~/Downloads/BRD';
@@ -66,7 +69,7 @@ export function createEmptyBrd(): BrdState {
 
 /** Compute the next version label given the history and the bump kind (spec 2.7.2). */
 function nextVersion(
-  versions: BrdState['versions'],
+  versions: { major: number; minor: number }[],
   bump: 'minor' | 'major',
 ): { label: string; major: number; minor: number } {
   if (versions.length === 0) return { label: '1.0', major: 1, minor: 0 };
@@ -74,6 +77,16 @@ function nextVersion(
   const major = bump === 'major' ? last.major + 1 : last.major;
   const minor = bump === 'major' ? 0 : last.minor + 1;
   return { label: `${major}.${minor}`, major, minor };
+}
+
+/** A fresh Conceptual Data Modeler workspace, seeded from the default domain. */
+export function createEmptyModel(): ModelState {
+  return {
+    domain: DEFAULT_DOMAIN_ID,
+    versions: [],
+    activeVersion: null,
+    revisionNote: '',
+  };
 }
 
 function emptyStageMeta(): Record<StageId, StageMeta> {
@@ -102,6 +115,7 @@ export function createEmptyProject(): Project {
     stageMeta: emptyStageMeta(),
     agentResults: {},
     brd: createEmptyBrd(),
+    model: createEmptyModel(),
   };
 }
 
@@ -142,6 +156,13 @@ interface ProjectState {
   /** Append a generated revision and make it active; computes the version bump. */
   addBrdVersion: (doc: BrdDocument, source: ResultSource, bump: 'minor' | 'major') => string;
   setActiveBrdVersion: (label: string) => void;
+
+  // --- Conceptual Data Modeler (spec 3.x) ---
+  setModelDomain: (domainId: string) => void;
+  setModelRevisionNote: (note: string) => void;
+  /** Append a generated model revision and make it active; computes the version bump. */
+  addModelVersion: (doc: ConceptualModel, source: ResultSource, bump: 'minor' | 'major') => string;
+  setActiveModelVersion: (label: string) => void;
 
   resetProject: () => void;
   /** Replace the whole project, e.g. when restoring from a backup file. */
@@ -352,6 +373,42 @@ export const useProjectStore = create<ProjectState>()(
           project: touch({ ...s.project, brd: { ...s.project.brd, activeVersion: label } }),
         })),
 
+      setModelDomain: (domainId) =>
+        set((s) => ({
+          project: touch({ ...s.project, model: { ...s.project.model, domain: domainId } }),
+        })),
+
+      setModelRevisionNote: (note) =>
+        set((s) => ({
+          project: touch({ ...s.project, model: { ...s.project.model, revisionNote: note } }),
+        })),
+
+      addModelVersion: (doc, source, bump) => {
+        const { label, major, minor } = nextVersion(
+          useProjectStore.getState().project.model.versions,
+          bump,
+        );
+        set((s) => ({
+          project: touch({
+            ...s.project,
+            model: {
+              ...s.project.model,
+              versions: [
+                ...s.project.model.versions,
+                { label, major, minor, at: Date.now(), source, doc: { ...doc, version: label } },
+              ],
+              activeVersion: label,
+            },
+          }),
+        }));
+        return label;
+      },
+
+      setActiveModelVersion: (label) =>
+        set((s) => ({
+          project: touch({ ...s.project, model: { ...s.project.model, activeVersion: label } }),
+        })),
+
       resetProject: () => set({ project: createEmptyProject(), lastSavedAt: Date.now() }),
 
       replaceProject: (project) => set({ project: touch(project), lastSavedAt: Date.now() }),
@@ -392,6 +449,10 @@ export const useProjectStore = create<ProjectState>()(
         if (fromVersion < 4 && state?.project) {
           // v3 -> v4: add the BRD Generator workspace.
           state.project.brd = state.project.brd ?? createEmptyBrd();
+        }
+        if (fromVersion < 5 && state?.project) {
+          // v4 -> v5: add the Conceptual Data Modeler workspace.
+          state.project.model = state.project.model ?? createEmptyModel();
         }
         return state;
       },

@@ -185,6 +185,75 @@ export interface BrdState {
   comments: Partial<Record<BrdSectionId, string>>;
 }
 
+/**
+ * --- Conceptual Data Modeler (spec 3.x) -------------------------------------
+ * The second feature tab. The agent reads the generated BRD and produces a
+ * RIGOROUS conceptual data model — business entities and their relationships,
+ * with no physical/column detail — adapted to the project's domain. Everything
+ * is versioned and persisted so the workspace survives a refresh.
+ */
+
+/** How an entity participates in the conceptual model. */
+export type ModelEntityType =
+  | 'Dimension'
+  | 'Fact'
+  | 'Bridge'
+  | 'Hierarchy'
+  | 'Reference'
+  | 'Event';
+
+/** Cardinality on a relationship between two entities. */
+export type ModelCardinality = '1:1' | '1:N' | 'N:1' | 'N:N';
+
+export interface ModelEntity {
+  name: string;
+  type: ModelEntityType;
+  description: string;
+  /** 3–7 conceptual key attributes in Title Case (no types/lengths). */
+  keyAttributes: string[];
+}
+
+export interface ModelRelationship {
+  /** Must match a `ModelEntity.name` exactly. */
+  from: string;
+  /** Must match a `ModelEntity.name` exactly. */
+  to: string;
+  cardinality: ModelCardinality;
+  /** Short business label, e.g. "submits", "covers". */
+  label: string;
+}
+
+/** A complete conceptual data model. */
+export interface ConceptualModel {
+  name: string;
+  domain: string;
+  version: string;
+  overview: string;
+  entities: ModelEntity[];
+  relationships: ModelRelationship[];
+}
+
+/** A single generated revision of the model, kept in history. */
+export interface ModelVersion {
+  label: string;
+  major: number;
+  minor: number;
+  at: number;
+  source: ResultSource;
+  doc: ConceptualModel;
+}
+
+/** All persisted Conceptual Data Modeler state for the tab. */
+export interface ModelState {
+  /** Domain used for vocabulary; defaults to the BRD domain, user-overridable. */
+  domain: string;
+  versions: ModelVersion[];
+  /** Label of the version currently shown in the output column. */
+  activeVersion: string | null;
+  /** A free-form revision request fed into the next Regenerate. */
+  revisionNote: string;
+}
+
 export interface Project {
   /** Stable id; lets us key persisted blobs and future multi-project support. */
   id: string;
@@ -202,6 +271,8 @@ export interface Project {
   agentResults: Partial<Record<StageId, StageResult>>;
   /** BRD Generator workspace (spec 2.x). */
   brd: BrdState;
+  /** Conceptual Data Modeler workspace (spec 3.x). */
+  model: ModelState;
 }
 
 export type ThemeMode = 'light' | 'dark';
