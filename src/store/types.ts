@@ -24,12 +24,54 @@ export interface BusinessRequirements {
   successMetrics: string;
 }
 
+export type ConnectorPlatform =
+  | 'snowflake'
+  | 'databricks'
+  | 'azure-synapse'
+  | 'azure-data-lake'
+  | 'azure-sql'
+  | 'aws-s3'
+  | 'aws-redshift'
+  | 'aws-glue'
+  | 'generic';
+
+export interface ConnectorConfig {
+  /** Snowflake */
+  account?: string;
+  warehouse?: string;
+  database?: string;
+  schema?: string;
+  role?: string;
+  /** Databricks */
+  workspaceUrl?: string;
+  httpPath?: string;
+  catalog?: string;
+  /** Azure */
+  serverName?: string;
+  storageAccount?: string;
+  container?: string;
+  /** AWS */
+  region?: string;
+  bucketName?: string;
+  accessKeyId?: string;
+  clusterIdentifier?: string;
+  glueDatabase?: string;
+  /** Common */
+  host?: string;
+  port?: string;
+  username?: string;
+  connectionString?: string;
+}
+
 export interface DataSource {
   id: string;
   name: string;
   kind: 'warehouse' | 'database' | 'api' | 'file' | 'stream';
+  platform: ConnectorPlatform;
   connection: string;
+  config: ConnectorConfig;
   notes: string;
+  status: 'configured' | 'untested' | 'connected' | 'error';
 }
 
 export interface EngineeringPlan {
