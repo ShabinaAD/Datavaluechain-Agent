@@ -435,6 +435,202 @@ app.post('/api/logical/generate', async (req, res) => {
   }
 });
 
+// --- Physical Model / DDL (spec 2.3) -----------------------------------------
+
+const PHYSICAL_JSON_INSTRUCTIONS = `You are a Principal Data Modeler AND Platform Engineer with 20+ years across Snowflake, Databricks (Delta Lake), Amazon Redshift, Google BigQuery, and Azure Synapse — you know each dialect, partitioning/clustering model, and type system cold.
+
+Produce a RIGOROUS PHYSICAL DATA MODEL from the BRD + Logical Model: runnable CREATE TABLE DDL for the target platform with concrete types, NOT NULL/PK/FK constraints, partition/cluster/distribution hints, and comments tracing back to the logical entity. TWO LAYERS (Medallion):
+  SILVER : cleansed, conformed, source-aligned (~1:1 with logical entities + audit cols + DQ via NOT NULL/CHECK + platform-native types). The single source of truth.
+  GOLD   : dimensional star/snowflake from Silver — dim_* / fact_* / bridge_* ; SCD Type 2 where history matters.
+
+1. EVERY logical entity appears in SILVER (silver_<entity_snake>; may add _hist tables, never drop an entity).
+2. GOLD dimensional: descriptive→dim_*, event/transaction→fact_*, N:N→bridge_*, history→SCD2 (<dim>_sk + effective_start_date/effective_end_date/current_flag).
+3. Every table: surrogate PK using the platform's monotonic-id type; Silver audit cols ingestion_ts/source_system/record_hash; NOT NULL on PK/FK/business keys; explicit FOREIGN KEY constraints.
+4. Platform-specific DDL dialect — emit valid, pasteable CREATE TABLE for the requested platform.
+
+Return ONLY this JSON object (no prose, no markdown fences):
+{ "name", "domain", "platform", "version", "overview",
+  "silver":[{"name","logical_entity","table_type","description","columns":[{"name","data_type","nullable","is_primary_key","is_foreign_key","references":{"entity","attribute"}|null,"description","tags":[]}],"ddl":"CREATE TABLE ..."}],
+  "gold":[...same shape...] }`;
+
+app.post('/api/physical/generate', async (req, res) => {
+  const { domainLabel, projectName, brdText, logicalModel, platform, revisionNote } = req.body ?? {};
+  if (typeof logicalModel !== 'string' || !logicalModel.trim()) {
+    res.status(400).json({ error: 'logicalModel is required' });
+    return;
+  }
+  if (!aiConfigured) {
+    res.json({ source: 'unavailable', reason: 'not_configured' });
+    return;
+  }
+
+  const userPrompt = [
+    `Domain: ${domainLabel || 'General'}`,
+    `Target platform: ${platform || 'Snowflake'}`,
+    projectName ? `Project name: ${projectName}` : '',
+    typeof brdText === 'string' && brdText.trim() ? `BRD:\n${brdText}` : '',
+    `Logical model:\n${logicalModel}`,
+    typeof revisionNote === 'string' && revisionNote.trim()
+      ? `Revision request:\n${revisionNote}`
+      : '',
+  ].filter(Boolean).join('\n\n');
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45_000);
+    const upstream = await fetch(`${config.ai.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${config.ai.apiKey}` },
+      body: JSON.stringify({
+        model: config.ai.model,
+        messages: [
+          { role: 'system', content: PHYSICAL_JSON_INSTRUCTIONS },
+          { role: 'user', content: userPrompt },
+        ],
+        response_format: { type: 'json_object' },
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!upstream.ok) { res.json({ source: 'unavailable', reason: 'upstream_error' }); return; }
+    const data = await upstream.json();
+    const content = data?.choices?.[0]?.message?.content ?? '';
+    const doc = parseJsonLoose(content);
+    if (!doc) { res.json({ source: 'unavailable', reason: 'unparseable' }); return; }
+    res.json({ source: 'ai', doc });
+  } catch (err) {
+    console.warn(`[physical] request failed: ${err?.name ?? 'error'}`);
+    res.json({ source: 'unavailable', reason: 'request_failed' });
+  }
+});
+
+// --- Code Gen (spec 3) -------------------------------------------------------
+
+const CODEGEN_INSTRUCTIONS = `You are a Senior ETL Engineer with 15+ years on Snowflake, Databricks (Delta Lake/DLT), Amazon Redshift, Google BigQuery, Azure Synapse, AWS Glue. You ship pipeline code juniors can read, reviewers can approve, and on-call can debug at 2am. You write idiomatic code per platform.
+
+STRICT OUTPUT RULES:
+1. Output ONLY the runnable code file body. No markdown fences, no preamble.
+2. Begin with a banner comment: flow name, target platform+language, source/target tables, load strategy, idempotency instructions.
+3. Every transformation/MERGE/UPSERT block is preceded by a comment citing the business rule and the DQ rule. Comment density is a requirement.
+4. Runnable with minimal edits: parameterise via a labelled config block.
+5. Implement every target column — no gaps. Surrogate keys via IDENTITY/SEQUENCE/ROW_NUMBER; SCD Type 2 via standard mechanics.
+6. DQ rules become real checks: SQL CHECK constraints or INSERT…WHERE guards.
+
+Produce production-grade, idiomatic, fully-commented code for the requested stage, platform, and language only.`;
+
+app.post('/api/codegen/generate', async (req, res) => {
+  const { stage, platform, language, physicalModel, revisionNote } = req.body ?? {};
+  if (typeof physicalModel !== 'string' || !physicalModel.trim()) {
+    res.status(400).json({ error: 'physicalModel is required' });
+    return;
+  }
+  if (!aiConfigured) {
+    res.json({ source: 'unavailable', reason: 'not_configured' });
+    return;
+  }
+
+  const userPrompt = [
+    `Stage: ${stage || 'bronze-to-silver'}`,
+    `Platform: ${platform || 'Snowflake'}`,
+    `Language: ${language || 'SQL'}`,
+    `Physical model:\n${physicalModel}`,
+    typeof revisionNote === 'string' && revisionNote.trim() ? `Notes:\n${revisionNote}` : '',
+  ].filter(Boolean).join('\n\n');
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45_000);
+    const upstream = await fetch(`${config.ai.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${config.ai.apiKey}` },
+      body: JSON.stringify({
+        model: config.ai.model,
+        messages: [
+          { role: 'system', content: CODEGEN_INSTRUCTIONS },
+          { role: 'user', content: userPrompt },
+        ],
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!upstream.ok) { res.json({ source: 'unavailable', reason: 'upstream_error' }); return; }
+    const data = await upstream.json();
+    const content = data?.choices?.[0]?.message?.content ?? '';
+    if (!content.trim()) { res.json({ source: 'unavailable', reason: 'empty' }); return; }
+    // Strip markdown fences if present
+    const code = content.replace(/^```[\w]*\n?/gm, '').replace(/```$/gm, '').trim();
+    res.json({ source: 'ai', code });
+  } catch (err) {
+    console.warn(`[codegen] request failed: ${err?.name ?? 'error'}`);
+    res.json({ source: 'unavailable', reason: 'request_failed' });
+  }
+});
+
+// --- Viz Gen / Dashboard Design (spec 6) ------------------------------------
+
+const VIZ_JSON_INSTRUCTIONS = `You are a Principal Data Visualization Architect. You design dashboard specifications from physical data models.
+
+Given the physical model (Silver + Gold tables with their columns), produce a dashboard specification with KPI cards and visualization widgets.
+
+Return ONLY this JSON object:
+{ "name", "domain", "version", "overview", "layout":"single|grid|narrative",
+  "widgets":[{"id","type":"kpi|bar|line|area|pie|table|scatter",
+    "title","description","data_source","config":"..."}] }
+
+Rules:
+1. 3-5 KPI cards showing key metrics from fact tables.
+2. 3-5 chart widgets (mix of bar, line, pie, table) grounded in the Gold layer tables.
+3. Each widget's data_source must reference a real table from the physical model.
+4. config is a JSON string with chart-specific settings (x, y, aggregation, etc.).
+5. Overview: 2-3 sentences describing the dashboard's purpose.`;
+
+app.post('/api/viz/generate', async (req, res) => {
+  const { domain, projectName, physicalModel, revisionNote } = req.body ?? {};
+  if (typeof physicalModel !== 'string' || !physicalModel.trim()) {
+    res.status(400).json({ error: 'physicalModel is required' });
+    return;
+  }
+  if (!aiConfigured) {
+    res.json({ source: 'unavailable', reason: 'not_configured' });
+    return;
+  }
+
+  const userPrompt = [
+    `Domain: ${domain || 'General'}`,
+    projectName ? `Project: ${projectName}` : '',
+    `Physical model:\n${physicalModel}`,
+    typeof revisionNote === 'string' && revisionNote.trim() ? `Notes:\n${revisionNote}` : '',
+  ].filter(Boolean).join('\n\n');
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    const upstream = await fetch(`${config.ai.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${config.ai.apiKey}` },
+      body: JSON.stringify({
+        model: config.ai.model,
+        messages: [
+          { role: 'system', content: VIZ_JSON_INSTRUCTIONS },
+          { role: 'user', content: userPrompt },
+        ],
+        response_format: { type: 'json_object' },
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!upstream.ok) { res.json({ source: 'unavailable', reason: 'upstream_error' }); return; }
+    const data = await upstream.json();
+    const content = data?.choices?.[0]?.message?.content ?? '';
+    const doc = parseJsonLoose(content);
+    if (!doc) { res.json({ source: 'unavailable', reason: 'unparseable' }); return; }
+    res.json({ source: 'ai', doc });
+  } catch (err) {
+    console.warn(`[viz] request failed: ${err?.name ?? 'error'}`);
+    res.json({ source: 'unavailable', reason: 'request_failed' });
+  }
+});
+
 /** Expand a leading "~" to the user's home directory. */
 function expandHome(p) {
   if (typeof p !== 'string' || !p) return '';

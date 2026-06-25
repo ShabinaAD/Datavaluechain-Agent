@@ -348,6 +348,155 @@ export interface LogicalState {
   revisionNote: string;
 }
 
+/**
+ * --- Physical Model / DDL (spec 2.3) -----------------------------------------
+ * Runnable CREATE TABLE DDL for Silver + Gold layers on a chosen platform.
+ */
+
+export type PhysicalPlatform =
+  | 'Snowflake'
+  | 'Databricks'
+  | 'Redshift'
+  | 'BigQuery'
+  | 'Azure Synapse';
+
+export type PhysicalLayer = 'silver' | 'gold';
+
+export interface PhysicalColumn {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  isPrimaryKey: boolean;
+  isForeignKey: boolean;
+  references: LogicalAttributeRef | null;
+  description: string;
+  tags: string[];
+}
+
+export interface PhysicalTable {
+  name: string;
+  logicalEntity: string;
+  tableType: ModelEntityType;
+  description: string;
+  columns: PhysicalColumn[];
+  ddl: string;
+}
+
+export interface PhysicalLayerModel {
+  layer: PhysicalLayer;
+  tables: PhysicalTable[];
+}
+
+export interface PhysicalModel {
+  name: string;
+  domain: string;
+  platform: PhysicalPlatform;
+  version: string;
+  overview: string;
+  silver: PhysicalTable[];
+  gold: PhysicalTable[];
+}
+
+export interface PhysicalVersion {
+  label: string;
+  major: number;
+  minor: number;
+  at: number;
+  source: ResultSource;
+  doc: PhysicalModel;
+}
+
+export interface PhysicalState {
+  platform: PhysicalPlatform;
+  versions: PhysicalVersion[];
+  activeVersion: string | null;
+  revisionNote: string;
+}
+
+/**
+ * --- Code Gen (spec 3) -------------------------------------------------------
+ * Generates pipeline code for each medallion stage on a chosen platform/language.
+ */
+
+export type CodeGenStage = 'source-to-bronze' | 'bronze-to-silver' | 'silver-to-gold';
+
+export interface CodeGenFile {
+  stage: CodeGenStage;
+  platform: PhysicalPlatform;
+  language: string;
+  fileName: string;
+  code: string;
+  source: ResultSource;
+  at: number;
+}
+
+export interface CodeGenState {
+  platform: PhysicalPlatform;
+  language: string;
+  outputFolder: string;
+  files: CodeGenFile[];
+  revisionNote: string;
+}
+
+/**
+ * --- Viz Gen / Dashboard Design (spec 6) ------------------------------------
+ * Generates dashboard specifications: KPI cards, charts, layout.
+ */
+
+export interface VizWidget {
+  id: string;
+  type: 'kpi' | 'bar' | 'line' | 'area' | 'pie' | 'table' | 'scatter';
+  title: string;
+  description: string;
+  dataSource: string;
+  config: string;
+}
+
+export interface VizDashboard {
+  name: string;
+  domain: string;
+  version: string;
+  overview: string;
+  layout: 'single' | 'grid' | 'narrative';
+  widgets: VizWidget[];
+}
+
+export interface VizVersion {
+  label: string;
+  major: number;
+  minor: number;
+  at: number;
+  source: ResultSource;
+  doc: VizDashboard;
+}
+
+export interface VizState {
+  versions: VizVersion[];
+  activeVersion: string | null;
+  revisionNote: string;
+}
+
+/**
+ * --- Review & Publish --------------------------------------------------------
+ * Tracks review status of each artefact across the value chain.
+ */
+
+export type ReviewVerdict = 'pending' | 'approved' | 'rejected' | 'skipped';
+
+export interface ArtefactReview {
+  artefact: string;
+  verdict: ReviewVerdict;
+  reviewer: string;
+  note: string;
+  at: number;
+}
+
+export interface ReviewState {
+  reviews: ArtefactReview[];
+  releaseNotes: string;
+  signedOff: boolean;
+}
+
 export interface Project {
   /** Stable id; lets us key persisted blobs and future multi-project support. */
   id: string;
@@ -369,6 +518,14 @@ export interface Project {
   model: ModelState;
   /** Logical Data Modeler workspace (spec 3.x, logical layer). */
   logical: LogicalState;
+  /** Physical Model / DDL workspace (spec 2.3). */
+  physical: PhysicalState;
+  /** Code Gen workspace (spec 3). */
+  codegen: CodeGenState;
+  /** Viz Gen / Dashboard Design workspace (spec 6). */
+  viz: VizState;
+  /** Review & Publish workspace. */
+  review: ReviewState;
 }
 
 export type ThemeMode = 'light' | 'dark';

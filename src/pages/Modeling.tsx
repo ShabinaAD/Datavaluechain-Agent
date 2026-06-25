@@ -1,25 +1,21 @@
 import { useState } from 'react';
 import { ModelGenerator } from '../components/model/ModelGenerator';
 import { LogicalGenerator } from '../components/model/LogicalGenerator';
+import { PhysicalGenerator } from '../components/model/PhysicalGenerator';
 import { useProjectStore } from '../store/projectStore';
 
-type ModelStage = 'conceptual' | 'logical';
+type ModelStage = 'conceptual' | 'logical' | 'physical';
 
-/**
- * The Modeling tab hosts two stages of the data modeler (spec 3.x):
- *   - Conceptual: business entities + relationships, grounded in the BRD.
- *   - Logical: a platform-agnostic 3NF/dimensional model derived from the
- *     conceptual one (typed attributes, PK/FK, bridge tables).
- * The logical stage takes the conceptual model as its authoritative input.
- */
 export function Modeling() {
   const [stage, setStage] = useState<ModelStage>('conceptual');
   const conceptualCount = useProjectStore((s) => s.project.model.versions.length);
   const logicalCount = useProjectStore((s) => s.project.logical.versions.length);
+  const physicalCount = useProjectStore((s) => s.project.physical.versions.length);
 
   const tabs: { id: ModelStage; label: string; count: number }[] = [
     { id: 'conceptual', label: 'Conceptual', count: conceptualCount },
     { id: 'logical', label: 'Logical', count: logicalCount },
+    { id: 'physical', label: 'Physical (DDL)', count: physicalCount },
   ];
 
   return (
@@ -46,7 +42,9 @@ export function Modeling() {
         ))}
       </div>
 
-      {stage === 'conceptual' ? <ModelGenerator /> : <LogicalGenerator />}
+      {stage === 'conceptual' && <ModelGenerator />}
+      {stage === 'logical' && <LogicalGenerator />}
+      {stage === 'physical' && <PhysicalGenerator />}
     </div>
   );
 }
