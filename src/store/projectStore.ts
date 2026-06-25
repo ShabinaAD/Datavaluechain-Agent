@@ -55,7 +55,8 @@ const STORAGE_KEY = 'dvcaf.project';
 // v5 introduced the Conceptual Data Modeler workspace.
 // v6 introduced the Logical Data Modeler workspace.
 // v7 introduced Physical, Code Gen, Viz Gen, and Review workspaces.
-const STORAGE_VERSION = 7;
+// v8 introduced enhanced DataSource connectors (platform, config, status).
+const STORAGE_VERSION = 8;
 
 /** Sensible default output folder for the .docx export (spec 2.5.7). */
 const DEFAULT_OUTPUT_FOLDER = '~/Downloads/BRD';
@@ -310,8 +311,11 @@ export const useProjectStore = create<ProjectState>()(
                 id: makeId('src'),
                 name: '',
                 kind: 'warehouse',
+                platform: 'generic',
                 connection: '',
+                config: {},
                 notes: '',
+                status: 'untested',
               },
             ],
           }),
@@ -327,8 +331,11 @@ export const useProjectStore = create<ProjectState>()(
                 id: makeId('src'),
                 name: '',
                 kind: 'file',
+                platform: 'generic',
                 connection: '',
+                config: {},
                 notes: '',
+                status: 'untested',
                 ...partial,
               },
             ],
@@ -713,6 +720,16 @@ export const useProjectStore = create<ProjectState>()(
           state.project.codegen = state.project.codegen ?? createEmptyCodeGen();
           state.project.viz = state.project.viz ?? createEmptyViz();
           state.project.review = state.project.review ?? createEmptyReview();
+        }
+        if (fromVersion < 8 && state?.project) {
+          // v7 -> v8: backfill enhanced DataSource connector fields.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          state.project.sources = (state.project.sources ?? []).map((src: any) => ({
+            ...src,
+            platform: src.platform ?? 'generic',
+            config: src.config ?? {},
+            status: src.status ?? 'untested',
+          }));
         }
         return state;
       },
