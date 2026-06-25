@@ -1,10 +1,13 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type {
+  ArtefactReview,
   BrdDocument,
   BrdSectionId,
   BrdState,
   BusinessRequirements,
+  CodeGenFile,
+  CodeGenState,
   ConceptualModel,
   DashboardPlan,
   DataSource,
@@ -13,12 +16,19 @@ import type {
   LogicalState,
   ModelState,
   ModelingPlan,
+  PhysicalModel,
+  PhysicalPlatform,
+  PhysicalState,
   Project,
   ResultSource,
+  ReviewState,
+  ReviewVerdict,
   StageId,
   StageMeta,
   StageResult,
   StageStatus,
+  VizDashboard,
+  VizState,
 } from './types';
 import { WORKFLOW_STAGES } from '../config/workflow';
 import { DEFAULT_DOMAIN_ID, domainById } from '../config/domains';
@@ -44,7 +54,8 @@ const STORAGE_KEY = 'dvcaf.project';
 // v4 introduced the BRD Generator workspace.
 // v5 introduced the Conceptual Data Modeler workspace.
 // v6 introduced the Logical Data Modeler workspace.
-const STORAGE_VERSION = 6;
+// v7 introduced Physical, Code Gen, Viz Gen, and Review workspaces.
+const STORAGE_VERSION = 7;
 
 /** Sensible default output folder for the .docx export (spec 2.5.7). */
 const DEFAULT_OUTPUT_FOLDER = '~/Downloads/BRD';
@@ -102,6 +113,41 @@ export function createEmptyLogical(): LogicalState {
   };
 }
 
+export function createEmptyPhysical(): PhysicalState {
+  return {
+    platform: 'Snowflake',
+    versions: [],
+    activeVersion: null,
+    revisionNote: '',
+  };
+}
+
+export function createEmptyCodeGen(): CodeGenState {
+  return {
+    platform: 'Snowflake',
+    language: 'SQL',
+    outputFolder: '~/Downloads/CodeGen',
+    files: [],
+    revisionNote: '',
+  };
+}
+
+export function createEmptyViz(): VizState {
+  return {
+    versions: [],
+    activeVersion: null,
+    revisionNote: '',
+  };
+}
+
+export function createEmptyReview(): ReviewState {
+  return {
+    reviews: [],
+    releaseNotes: '',
+    signedOff: false,
+  };
+}
+
 function emptyStageMeta(): Record<StageId, StageMeta> {
   return WORKFLOW_STAGES.reduce(
     (acc, stage) => {
@@ -130,6 +176,10 @@ export function createEmptyProject(): Project {
     brd: createEmptyBrd(),
     model: createEmptyModel(),
     logical: createEmptyLogical(),
+    physical: createEmptyPhysical(),
+    codegen: createEmptyCodeGen(),
+    viz: createEmptyViz(),
+    review: createEmptyReview(),
   };
 }
 
@@ -181,9 +231,31 @@ interface ProjectState {
   // --- Logical Data Modeler (spec 3.x, logical layer) ---
   setLogicalDomain: (domainId: string) => void;
   setLogicalRevisionNote: (note: string) => void;
-  /** Append a generated logical revision and make it active; computes the version bump. */
   addLogicalVersion: (doc: LogicalModel, source: ResultSource, bump: 'minor' | 'major') => string;
   setActiveLogicalVersion: (label: string) => void;
+
+  // --- Physical Model / DDL ---
+  setPhysicalPlatform: (platform: PhysicalPlatform) => void;
+  setPhysicalRevisionNote: (note: string) => void;
+  addPhysicalVersion: (doc: PhysicalModel, source: ResultSource, bump: 'minor' | 'major') => string;
+  setActivePhysicalVersion: (label: string) => void;
+
+  // --- Code Gen ---
+  setCodeGenPlatform: (platform: PhysicalPlatform) => void;
+  setCodeGenLanguage: (language: string) => void;
+  setCodeGenRevisionNote: (note: string) => void;
+  addCodeGenFile: (file: CodeGenFile) => void;
+
+  // --- Viz Gen ---
+  setVizRevisionNote: (note: string) => void;
+  addVizVersion: (doc: VizDashboard, source: ResultSource, bump: 'minor' | 'major') => string;
+  setActiveVizVersion: (label: string) => void;
+
+  // --- Review & Publish ---
+  addReview: (review: ArtefactReview) => void;
+  setReviewVerdict: (artefact: string, verdict: ReviewVerdict) => void;
+  setReleaseNotes: (notes: string) => void;
+  setSignedOff: (signedOff: boolean) => void;
 
   resetProject: () => void;
   /** Replace the whole project, e.g. when restoring from a backup file. */
@@ -466,6 +538,126 @@ export const useProjectStore = create<ProjectState>()(
           project: touch({ ...s.project, logical: { ...s.project.logical, activeVersion: label } }),
         })),
 
+      // --- Physical Model / DDL ---
+      setPhysicalPlatform: (platform) =>
+        set((s) => ({
+          project: touch({ ...s.project, physical: { ...s.project.physical, platform } }),
+        })),
+      setPhysicalRevisionNote: (note) =>
+        set((s) => ({
+          project: touch({ ...s.project, physical: { ...s.project.physical, revisionNote: note } }),
+        })),
+      addPhysicalVersion: (doc, source, bump) => {
+        const { label, major, minor } = nextVersion(
+          useProjectStore.getState().project.physical.versions,
+          bump,
+        );
+        set((s) => ({
+          project: touch({
+            ...s.project,
+            physical: {
+              ...s.project.physical,
+              versions: [
+                ...s.project.physical.versions,
+                { label, major, minor, at: Date.now(), source, doc: { ...doc, version: label } },
+              ],
+              activeVersion: label,
+            },
+          }),
+        }));
+        return label;
+      },
+      setActivePhysicalVersion: (label) =>
+        set((s) => ({
+          project: touch({ ...s.project, physical: { ...s.project.physical, activeVersion: label } }),
+        })),
+
+      // --- Code Gen ---
+      setCodeGenPlatform: (platform) =>
+        set((s) => ({
+          project: touch({ ...s.project, codegen: { ...s.project.codegen, platform } }),
+        })),
+      setCodeGenLanguage: (language) =>
+        set((s) => ({
+          project: touch({ ...s.project, codegen: { ...s.project.codegen, language } }),
+        })),
+      setCodeGenRevisionNote: (note) =>
+        set((s) => ({
+          project: touch({ ...s.project, codegen: { ...s.project.codegen, revisionNote: note } }),
+        })),
+      addCodeGenFile: (file) =>
+        set((s) => ({
+          project: touch({
+            ...s.project,
+            codegen: { ...s.project.codegen, files: [...s.project.codegen.files, file] },
+          }),
+        })),
+
+      // --- Viz Gen ---
+      setVizRevisionNote: (note) =>
+        set((s) => ({
+          project: touch({ ...s.project, viz: { ...s.project.viz, revisionNote: note } }),
+        })),
+      addVizVersion: (doc, source, bump) => {
+        const { label, major, minor } = nextVersion(
+          useProjectStore.getState().project.viz.versions,
+          bump,
+        );
+        set((s) => ({
+          project: touch({
+            ...s.project,
+            viz: {
+              ...s.project.viz,
+              versions: [
+                ...s.project.viz.versions,
+                { label, major, minor, at: Date.now(), source, doc: { ...doc, version: label } },
+              ],
+              activeVersion: label,
+            },
+          }),
+        }));
+        return label;
+      },
+      setActiveVizVersion: (label) =>
+        set((s) => ({
+          project: touch({ ...s.project, viz: { ...s.project.viz, activeVersion: label } }),
+        })),
+
+      // --- Review & Publish ---
+      addReview: (review) =>
+        set((s) => ({
+          project: touch({
+            ...s.project,
+            review: {
+              ...s.project.review,
+              reviews: [
+                ...s.project.review.reviews,
+                { ...review, at: review.at || Date.now() },
+              ],
+            },
+          }),
+        })),
+      setReviewVerdict: (artefact, verdict) =>
+        set((s) => ({
+          project: touch({
+            ...s.project,
+            review: {
+              ...s.project.review,
+              reviews: s.project.review.reviews.map((r) =>
+                r.artefact === artefact ? { ...r, verdict, at: Date.now() } : r,
+              ),
+            },
+          }),
+        })),
+      setReleaseNotes: (notes) =>
+        set((s) => ({
+          project: touch({ ...s.project, review: { ...s.project.review, releaseNotes: notes } }),
+        })),
+      setSignedOff: (signedOff) =>
+        set((s) => ({
+          project: touch({ ...s.project, review: { ...s.project.review, signedOff } }),
+        })),
+
       resetProject: () => set({ project: createEmptyProject(), lastSavedAt: Date.now() }),
 
       replaceProject: (project) => set({ project: touch(project), lastSavedAt: Date.now() }),
@@ -514,6 +706,13 @@ export const useProjectStore = create<ProjectState>()(
         if (fromVersion < 6 && state?.project) {
           // v5 -> v6: add the Logical Data Modeler workspace.
           state.project.logical = state.project.logical ?? createEmptyLogical();
+        }
+        if (fromVersion < 7 && state?.project) {
+          // v6 -> v7: add Physical, Code Gen, Viz Gen, Review workspaces.
+          state.project.physical = state.project.physical ?? createEmptyPhysical();
+          state.project.codegen = state.project.codegen ?? createEmptyCodeGen();
+          state.project.viz = state.project.viz ?? createEmptyViz();
+          state.project.review = state.project.review ?? createEmptyReview();
         }
         return state;
       },

@@ -192,6 +192,115 @@ export async function requestLogical(
   }
 }
 
+// --- Physical Model / DDL (spec 2.3) -----------------------------------------
+
+export interface PhysicalGeneratePayload {
+  domain: string;
+  domainLabel: string;
+  projectName: string;
+  brdText: string;
+  logicalModel: string;
+  platform: string;
+  revisionNote: string;
+}
+
+export interface PhysicalGenerateResponse {
+  source: 'ai' | 'unavailable';
+  doc?: unknown;
+  reason?: string;
+}
+
+export async function requestPhysical(
+  payload: PhysicalGeneratePayload,
+): Promise<PhysicalGenerateResponse> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45_000);
+    const res = await fetch('/api/physical/generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return { source: 'unavailable', reason: `http_${res.status}` };
+    return (await res.json()) as PhysicalGenerateResponse;
+  } catch {
+    return { source: 'unavailable', reason: 'network' };
+  }
+}
+
+// --- Code Gen (spec 3) -------------------------------------------------------
+
+export interface CodeGenPayload {
+  stage: string;
+  platform: string;
+  language: string;
+  physicalModel: string;
+  revisionNote: string;
+}
+
+export interface CodeGenResponse {
+  source: 'ai' | 'unavailable';
+  code?: string;
+  reason?: string;
+}
+
+export async function requestCodeGen(
+  payload: CodeGenPayload,
+): Promise<CodeGenResponse> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45_000);
+    const res = await fetch('/api/codegen/generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return { source: 'unavailable', reason: `http_${res.status}` };
+    return (await res.json()) as CodeGenResponse;
+  } catch {
+    return { source: 'unavailable', reason: 'network' };
+  }
+}
+
+// --- Viz Gen / Dashboard Design (spec 6) ------------------------------------
+
+export interface VizGenPayload {
+  domain: string;
+  projectName: string;
+  physicalModel: string;
+  revisionNote: string;
+}
+
+export interface VizGenResponse {
+  source: 'ai' | 'unavailable';
+  doc?: unknown;
+  reason?: string;
+}
+
+export async function requestVizGen(
+  payload: VizGenPayload,
+): Promise<VizGenResponse> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 32_000);
+    const res = await fetch('/api/viz/generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return { source: 'unavailable', reason: `http_${res.status}` };
+    return (await res.json()) as VizGenResponse;
+  } catch {
+    return { source: 'unavailable', reason: 'network' };
+  }
+}
+
 export interface DocxPayload {
   doc: unknown;
   meta: Record<string, unknown>;
